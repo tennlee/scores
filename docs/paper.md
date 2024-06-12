@@ -12,7 +12,8 @@ authors:
   - name: Tennessee Leeuwenburg
     orcid: 0009-0008-2024-1967
     affiliation: 1 
-    corresponding: true # (This is how to denote the corresponding author)    
+    corresponding: true # (This is how to denote the corresponding author)   
+    email: tennessee.leeuwenburg@bom.gov.au 
   - name: Nicholas Loveday
     orcid: 0009-0000-5796-7069
     affiliation: 1
