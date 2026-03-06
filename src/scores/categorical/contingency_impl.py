@@ -1300,6 +1300,7 @@ class BinaryContingencyManager(BasicContingencyManager):
         *,
         reduce_dims: Optional[FlexibleDimensionTypes] = None,
         preserve_dims: Optional[FlexibleDimensionTypes] = None,
+        weights: Optional[xr.DataArray] = None,
     ) -> BasicContingencyManager:
         """
         Compute the contingency table, preserving or reducing the specified dimensions.
@@ -1307,12 +1308,15 @@ class BinaryContingencyManager(BasicContingencyManager):
         Args:
             - reduce_dims: Dimensions to reduce. Can be "all" to reduce all dimensions.
             - preserve_dims: Dimensions to preserve. Can be "all" to preserve all dimensions.
+            - weights: Optional weights to apply when aggregating counts. If provided,
+              weighted sums are used instead of simple sums. Weights must be broadcastable
+              to the event data dimensions and must not contain negative or NaN values.
 
         Returns:
             scores.categorical.BasicContingencyManager: A `scores` class which supports efficient
             calculation of contingency metrics.
         """
-        cd = self._get_counts(reduce_dims=reduce_dims, preserve_dims=preserve_dims)
+        cd = self._get_counts(reduce_dims=reduce_dims, preserve_dims=preserve_dims, weights=weights)
         return BasicContingencyManager(cd)
 
     def _get_counts(
@@ -1320,10 +1324,12 @@ class BinaryContingencyManager(BasicContingencyManager):
         *,
         reduce_dims: Optional[FlexibleDimensionTypes] = None,
         preserve_dims: Optional[FlexibleDimensionTypes] = None,
+        weights: Optional[xr.DataArray] = None,
     ) -> dict:
         """
-        Generates the uncomputed count values
+        Generates the uncomputed count values, optionally with weights.
         """
+        from scores.processing import aggregate
 
         to_reduce = scores.utils.gather_dimensions(
             self.fcst_events.dims,
@@ -1333,10 +1339,10 @@ class BinaryContingencyManager(BasicContingencyManager):
         )
 
         cd = {
-            "tp_count": self.tp.sum(dim=to_reduce),
-            "tn_count": self.tn.sum(dim=to_reduce),
-            "fp_count": self.fp.sum(dim=to_reduce),
-            "fn_count": self.fn.sum(dim=to_reduce),
+            "tp_count": aggregate(self.tp, reduce_dims=to_reduce, weights=weights, method="sum"),
+            "tn_count": aggregate(self.tn, reduce_dims=to_reduce, weights=weights, method="sum"),
+            "fp_count": aggregate(self.fp, reduce_dims=to_reduce, weights=weights, method="sum"),
+            "fn_count": aggregate(self.fn, reduce_dims=to_reduce, weights=weights, method="sum"),
         }
         total = cd["tp_count"] + cd["tn_count"] + cd["fp_count"] + cd["fn_count"]
         cd["total_count"] = total

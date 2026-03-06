@@ -1,5 +1,15 @@
 """
-Relative Economic Value metrics for forecast evaluation
+Relative Economic Value metrics for forecast evaluation.
+
+Three public functions are provided, each suited to a different workflow:
+
+- :py:func:`relative_economic_value_from_rates` — pure math from pre-computed
+  POD, POFD and climatology.
+- :py:func:`relative_economic_value_from_contingency` — from a pre-built
+  :py:class:`~scores.categorical.BinaryContingencyManager` or
+  :py:class:`~scores.categorical.BasicContingencyManager`.
+- :py:func:`relative_economic_value_from_threshold` — from raw forecast /
+  observation arrays with optional probability-threshold discretisation.
 """
 
 from collections.abc import Sequence
@@ -8,12 +18,14 @@ from typing import Optional, Union
 import numpy as np
 import xarray as xr
 
-from scores.categorical import probability_of_detection, probability_of_false_detection
-from scores.processing import aggregate, binary_discretise, broadcast_and_match_nan
+from scores.categorical import BasicContingencyManager, BinaryContingencyManager
+from scores.processing import binary_discretise, broadcast_and_match_nan
 from scores.typing import FlexibleDimensionTypes, XarrayLike, all_same_xarraylike
 from scores.utils import check_binary, check_weights, gather_dimensions
 
-# INPUT VALIDATION
+# ---------------------------------------------------------------------------
+# Input validation helpers
+# ---------------------------------------------------------------------------
 
 
 def _validate_dimensions(
@@ -56,7 +68,6 @@ def _validate_thresholds(
 
 def _validate_cost_loss_ratios(cost_loss_ratios: Union[float, Sequence[float]]) -> None:
     """Validate cost-loss ratio values are in [0,1] and monotonically increasing."""
-
     if cost_loss_ratios is None:
         raise ValueError("cost_loss_ratios must not be None")
     try:
@@ -74,10 +85,7 @@ def _validate_forecasts(
 
     Raises ValueError if the threshold is provided but forecast is not
     between 0 and 1 or threshold is None but the forecast is not 0, 1 or NaN.
-
     """
-
-    # Get Data Stats (Min/Max)
     if isinstance(fcst, xr.Dataset):
         fcst_min = min(var.min().item() for var in fcst.data_vars.values())
         fcst_max = max(var.max().item() for var in fcst.data_vars.values())
@@ -86,9 +94,7 @@ def _validate_forecasts(
         fcst_min = fcst_vals.min().item()
         fcst_max = fcst_vals.max().item()
 
-    # Validate based on configuration
     if threshold is not None:
-        # Probabilistic forecasts: validate range
         if fcst_min < 0 or fcst_max > 1:
             raise ValueError("When threshold is provided, fcst must contain values between 0 and 1")
     else:
@@ -112,7 +118,7 @@ def _validate_derived_metrics(
         raise ValueError("derived_metrics 'rational_user' can only be used when threshold parameter is provided")
 
 
-def _validate_rev_inputs(
+def _validate_threshold_inputs(
     fcst: XarrayLike,
     obs: XarrayLike,
     cost_loss_ratios: Union[float, Sequence[float]],
@@ -123,12 +129,7 @@ def _validate_rev_inputs(
     derived_metrics: Optional[Sequence[str]],
     threshold_outputs: Optional[Sequence[float]],
 ) -> None:
-    """
-    Validate inputs for REV calculation.
-
-    Raises ValueError if weights are datasets or one of the validations fails
-    """
-
+    """Validate inputs for the threshold-based REV calculation."""
     if isinstance(weights, xr.Dataset):
         raise ValueError("Weights cannot be Datasets. Convert to a DataArray or calculate separately.")
 
@@ -139,12 +140,13 @@ def _validate_rev_inputs(
     check_binary(obs, "obs")
     _validate_forecasts(fcst, threshold)
 
-    # Weights validation
     if weights is not None:
         check_weights(weights)
 
 
-# REV CALCULATION CORE
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
 
 
 def _calculate_rev_core(
@@ -155,40 +157,24 @@ def _calculate_rev_core(
     weights: Optional[xr.DataArray] = None,
     cost_loss_dim: str = "cost_loss_ratio",
 ) -> XarrayLike:
-    """
-    Core REV calculation from binary forecasts using scores library functions.
-    """
-
-    # Ensure that we're censoring off obs where forecasts are missing,
-    # mainly for climatology calculations.
+    """Core REV calculation from binary forecasts via BinaryContingencyManager."""
     binary_fcst, obs = broadcast_and_match_nan(binary_fcst, obs)
 
-    pod = probability_of_detection(binary_fcst, obs, reduce_dims=dims_to_reduce, weights=weights, check_args=False)
+    manager = BinaryContingencyManager(binary_fcst, obs)
+    basic = manager.transform(reduce_dims=dims_to_reduce, weights=weights)
 
-    pofd = probability_of_false_detection(
-        binary_fcst, obs, reduce_dims=dims_to_reduce, weights=weights, check_args=False
-    )
-
-    climatology = calculate_climatology(
-        obs,
-        reduce_dims=dims_to_reduce,
-        weights=weights,
-    )
-
-    result = relative_economic_value_from_rates(
-        pod=pod,
-        pofd=pofd,
-        climatology=climatology,
+    return relative_economic_value_from_rates(
+        pod=basic.hit_rate(),
+        pofd=basic.false_alarm_rate(),
+        climatology=basic.base_rate(),
         cost_loss_ratios=cost_loss_ratios,
         cost_loss_dim=cost_loss_dim,
     )
 
-    return result
-
 
 def calculate_climatology(
     obs: XarrayLike,
-    *,  # Force keyword arguments to be keyword-only
+    *,
     reduce_dims: Optional[FlexibleDimensionTypes] = None,
     preserve_dims: Optional[FlexibleDimensionTypes] = None,
     weights: Optional[xr.DataArray] = None,
@@ -196,46 +182,25 @@ def calculate_climatology(
     """
     Calculates the climatological base rate (mean of observations).
 
-    Handles weighted and unweighted means, including the case where weights
-    don't span all dimensions being reduced.
-
     Args:
         obs: An array containing binary values (typically {0, 1, np.nan})
-        reduce_dims: Optionally specify which dimensions to reduce when
-            calculating climatology. All other dimensions will be preserved. As a
-            special case, 'all' will reduce all dimensions. Only one
-            of `reduce_dims` and `preserve_dims` can be supplied. The default behaviour
-            if neither are supplied is to reduce all dims.
-        preserve_dims: Optionally specify which dimensions to preserve
-            when calculating climatology. All other dimensions will be reduced.
-            As a special case, 'all' will preserve all dimensions. Only one of
-            `reduce_dims` and `preserve_dims` can be supplied. The default behaviour
-            if neither are supplied is to reduce all dims.
-        weights: An array of weights to apply (e.g., weighting a grid by latitude).
-            If None, unweighted mean is calculated. Weights must be broadcastable
-            to the data dimensions and should not contain negative or NaN values.
+        reduce_dims: Dimensions to reduce. Default reduces all.
+        preserve_dims: Dimensions to preserve. Default reduces all.
+        weights: Optional weights for weighted mean.
 
     Returns:
         A DataArray of the climatological base rate.
     """
+    from scores.processing import aggregate
 
-    # Use gather_dimensions to determine which obs dimensions to reduce
-    # gather_dimensions will validate reduce_dims/preserve_dims automatically.
     dims_to_reduce = gather_dimensions(
-        fcst_dims=(),  # Not needed for climatology
+        fcst_dims=(),
         obs_dims=obs.dims,
         reduce_dims=reduce_dims,
         preserve_dims=preserve_dims,
         weights_dims=weights.dims if weights is not None else None,
     )
-    climatology = aggregate(
-        obs,
-        reduce_dims=dims_to_reduce,
-        weights=weights,
-        method="mean",
-    )
-
-    return climatology
+    return aggregate(obs, reduce_dims=dims_to_reduce, weights=weights, method="mean")
 
 
 def _create_output_dataset(
@@ -247,57 +212,32 @@ def _create_output_dataset(
     threshold_dim: str,
     cost_loss_dim: str,
 ) -> xr.Dataset:
-    """
-    Create output Dataset with derived metrics and threshold slices.
-
-    Args:
-        rev: Full REV DataArray with threshold and cost_loss_ratio dimensions
-        thresholds: List of threshold values
-        cost_loss_ratios: List of cost-loss ratio values
-        derived_metrics: Derived metrics to compute
-        threshold_outputs: Specific thresholds to extract
-        threshold_dim: Name of threshold dimension
-        cost_loss_dim: Name of cost-loss ratio dimension
-
-    Returns:
-        Dataset with requested outputs
-
-    Raises:
-        ValueError: If invalid derived_metrics values provided
-        ValueError: If 'rational_user' requested but thresholds don't match cost_loss_ratios
-    """
+    """Create output Dataset with derived metrics and threshold slices."""
     derived_metrics = [] if derived_metrics is None else list(derived_metrics)
     threshold_outputs = [] if threshold_outputs is None else list(threshold_outputs)
 
     result = xr.Dataset(attrs=rev.attrs)
 
-    # Add derived metrics
     for mode in derived_metrics:
         if mode == "maximum":
             result["maximum"] = rev.max(dim=threshold_dim)
         elif mode == "rational_user":  # pragma: no cover
-            # Check that thresholds match cost_loss_ratios exactly
             if list(thresholds) != list(cost_loss_ratios):
                 raise ValueError(
                     "Can only specify derived_metrics 'rational_user' if thresholds and cost_loss_ratios are identical"
                 )
-            # Extract diagonal where threshold == cost_loss_ratio
             actual_values = []
             for alpha in cost_loss_ratios:
                 val = rev.sel({threshold_dim: alpha, cost_loss_dim: alpha})
                 actual_values.append(val)
 
-            # Concat and assign proper coordinates
             result["rational_user"] = xr.concat(actual_values, dim=cost_loss_dim)
             result["rational_user"][cost_loss_dim] = cost_loss_ratios
 
-            # Drop threshold coordinate since it's redundant
             if threshold_dim in result["rational_user"].coords:
                 result["rational_user"] = result["rational_user"].drop_vars(threshold_dim)
 
-    # Add threshold-specific outputs
     for thresh in threshold_outputs:
-        # Use string formatting that's valid for variable names
         var_name = f"threshold_{thresh}".replace(".", "_")
         result[var_name] = rev.sel({threshold_dim: thresh}).drop_vars(threshold_dim)
 
@@ -305,9 +245,7 @@ def _create_output_dataset(
 
 
 def check_monotonic_array(array: Union[Sequence[float], np.ndarray]) -> None:
-    """
-    Checks array values are in range [0, 1] and monotonically increasing.
-    """
+    """Checks array values are in range [0, 1] and monotonically increasing."""
     try:
         np_array = np.array(array, dtype=float)
     except Exception as ex:
@@ -323,7 +261,9 @@ def check_monotonic_array(array: Union[Sequence[float], np.ndarray]) -> None:
         raise ValueError("the supplied array is not monotonically increasing.")
 
 
+# ---------------------------------------------------------------------------
 # PUBLIC API
+# ---------------------------------------------------------------------------
 
 
 def relative_economic_value_from_rates(
@@ -365,76 +305,26 @@ def relative_economic_value_from_rates(
             be between 0 and 1, representing the proportion of time the event occurs.
         cost_loss_ratios: Cost-loss ratio(s) at which to calculate REV. Must be
             strictly monotonically increasing values between 0 and 1. Can be a single
-            float or sequence of floats. The cost-loss ratio represents the ratio of
-            the cost of taking protective action to the loss incurred if the event
-            occurs without protection.
+            float or sequence of floats.
         cost_loss_dim: Name of the cost-loss ratio dimension in output. Default is
             'cost_loss_ratio'. Must not exist as a dimension in any input array.
 
     Returns:
-        xarray.DataArray or xarray.Dataset: REV values with dimensions from broadcasting the
-            input arrays, plus an additional 'cost_loss_ratio' dimension with coordinates
-            matching the supplied cost-loss ratios. Returns a Dataset if 'pod' and 'pofd' are Datasets,
-            otherwise returns a DataArray.
+        xarray.DataArray or xarray.Dataset: REV values with an additional
+            'cost_loss_ratio' dimension.
 
     Raises:
-        ValueError: If cost_loss_ratios is not strictly monotonically increasing,
-            is not one-dimensional, or contains values outside [0, 1].
-        ValueError: If 'cost_loss_ratio' dimension already exists in any input array.
-        TypeError: If 'pod' and 'pofd' are not both xarray DataArrays or both xarray Datasets.
-
-    Notes:
-        - REV = 1 indicates perfect forecast value (as good as perfect information)
-        - REV = 0 indicates no value over climatology
-        - REV < 0 indicates the forecast performs worse than climatology
-        - This function is typically called internally by `relative_economic_value()`
-          after computing POD and POFD from forecasts and observations
+        TypeError: If 'pod' and 'pofd' are not both DataArrays or both Datasets.
+        ValueError: If 'cost_loss_ratio' dimension already exists in any input.
 
     References:
         - Richardson, D. S. (2000). Skill and relative economic value of the ECMWF
-          ensemble prediction system. Quarterly Journal of the Royal Meteorological
-          Society, 126(563), 649-667. https://doi.org/10.1002/qj.49712656313
-
-    Examples:
-        Calculate REV from pre-computed rates:
-
-        >>> import numpy as np
-        >>> import xarray as xr
-        >>> from scores.probability import relative_economic_value_from_rates
-        >>>
-        >>> # Pre-computed detection rates
-        >>> pod = xr.DataArray([0.8, 0.6, 0.4], dims=['threshold'])
-        >>> pofd = xr.DataArray([0.2, 0.1, 0.05], dims=['threshold'])
-        >>> climatology = xr.DataArray(0.3)  # 30% base rate
-        >>>
-        >>> # Calculate REV at multiple cost-loss ratios
-        >>> cost_loss_ratios = [0.1, 0.3, 0.5, 0.7, 0.9]
-        >>> rev = relative_economic_value_from_rates(
-        ...     pod, pofd, climatology, cost_loss_ratios
-        ... )
-        >>> rev.dims
-        ('cost_loss_ratio', 'threshold')
-
-        Calculate REV values:
-
-        >>> # Perfect forecast scenario
-        >>> pod_perfect = xr.DataArray(1.0)
-        >>> pofd_perfect = xr.DataArray(0.0)
-        >>> climatology = xr.DataArray(0.5)
-        >>>
-        >>> rev = relative_economic_value_from_rates(
-        ...     pod_perfect, pofd_perfect, climatology,
-        ...     cost_loss_ratios=[0.5],
-        ... )
-        >>> rev.values  # Returns finite value close to 1
-        array([1.])
+          ensemble prediction system. *Q. J. R. Meteorol. Soc.*, 126(563), 649-667.
 
     See Also:
-        - :py:func:`scores.probability.relative_economic_value`
-        - :py:func:`scores.categorical.probability_of_detection`
-        - :py:func:`scores.categorical.probability_of_false_detection`
+        - :py:func:`relative_economic_value_from_contingency`
+        - :py:func:`relative_economic_value_from_threshold`
     """
-
     if not all_same_xarraylike([pod, pofd]):
         raise TypeError("Both pod and pofd must be either xarray DataArrays or xarray Datasets.")
 
@@ -448,7 +338,7 @@ def relative_economic_value_from_rates(
             result_dict[var] = relative_economic_value_from_rates(
                 pod[var],
                 pofd[var] if isinstance(pofd, xr.Dataset) else pofd,
-                (climatology[var] if isinstance(climatology, xr.Dataset) else climatology),
+                climatology[var] if isinstance(climatology, xr.Dataset) else climatology,
                 cost_loss_ratios,
                 cost_loss_dim=cost_loss_dim,
             )
@@ -463,24 +353,121 @@ def relative_economic_value_from_rates(
     obar, alphas = xr.broadcast(climatology, alphas)
     climatological_term = xr.where(obar < alphas, obar, alphas)
 
-    # calculate the relative economic value (equation 8)
-
-    rev = ((climatological_term) - (pofd * alphas * (1 - obar)) + (pod * obar * (1 - alphas)) - obar) / (
+    rev = (climatological_term - pofd * alphas * (1 - obar) + pod * obar * (1 - alphas) - obar) / (
         climatological_term - obar * alphas
     )
 
-    # tidy up floating point infinities - necessary because you can get
-    # near-zero in the denominator for alpha=0 or alpha=1
+    # Tidy up floating point infinities from near-zero denominators at alpha=0 or alpha=1
     rev = rev.where(~np.isinf(rev))
 
     return rev
 
 
-def relative_economic_value(
+def relative_economic_value_from_contingency(
+    contingency_manager: Union[BinaryContingencyManager, BasicContingencyManager],
+    cost_loss_ratios: Union[float, Sequence[float]],
+    *,
+    reduce_dims: Optional[FlexibleDimensionTypes] = None,
+    preserve_dims: Optional[FlexibleDimensionTypes] = None,
+    weights: Optional[xr.DataArray] = None,
+    cost_loss_dim: str = "cost_loss_ratio",
+) -> XarrayLike:
+    """
+    Calculates Relative Economic Value (REV) from a contingency manager.
+
+    This is the recommended entry point when you want to use a custom
+    :py:class:`~scores.categorical.EventOperator` (e.g.
+    :py:class:`~scores.categorical.ThresholdEventOperator`) to define events,
+    or when you already have a contingency table from another analysis.
+
+    When a :py:class:`~scores.categorical.BinaryContingencyManager` is supplied,
+    it is transformed (with optional ``reduce_dims``, ``preserve_dims`` and
+    ``weights``) to produce a
+    :py:class:`~scores.categorical.BasicContingencyManager`.  When a
+    :py:class:`~scores.categorical.BasicContingencyManager` is supplied
+    directly (already transformed), ``reduce_dims``, ``preserve_dims`` and
+    ``weights`` are ignored.
+
+    .. math::
+        \\begin{split}
+        \\text{REV} = \\frac{\\min(\\alpha, \\bar{o}) - F\\alpha(1-\\bar{o})
+                              + H\\bar{o}(1-\\alpha) - \\bar{o}}
+                             {\\min(\\alpha, \\bar{o}) - \\bar{o}\\alpha}
+        \\end{split}
+
+    Args:
+        contingency_manager: A pre-built contingency manager. Can be either a
+            :py:class:`~scores.categorical.BinaryContingencyManager` (which will
+            be transformed) or a
+            :py:class:`~scores.categorical.BasicContingencyManager` (used as-is).
+        cost_loss_ratios: Cost-loss ratio(s) at which to calculate REV. Must be
+            monotonically increasing values between 0 and 1.
+        reduce_dims: Dimensions to reduce when transforming a
+            ``BinaryContingencyManager``. Ignored for ``BasicContingencyManager``.
+        preserve_dims: Dimensions to preserve when transforming a
+            ``BinaryContingencyManager``. Ignored for ``BasicContingencyManager``.
+        weights: Optional weights for weighted aggregation when transforming a
+            ``BinaryContingencyManager``. Ignored for ``BasicContingencyManager``.
+        cost_loss_dim: Name of the cost-loss ratio dimension in output.
+
+    Returns:
+        xarray.DataArray: REV values with a ``cost_loss_ratio`` dimension.
+
+    Examples:
+        Using a :py:class:`~scores.categorical.ThresholdEventOperator`:
+
+        >>> from scores.categorical import ThresholdEventOperator
+        >>> event_op = ThresholdEventOperator(default_event_threshold=10)
+        >>> manager = event_op.make_contingency_manager(fcst, obs, event_threshold=10)
+        >>> rev = relative_economic_value_from_contingency(
+        ...     manager, cost_loss_ratios=[0.1, 0.3, 0.5, 0.7, 0.9]
+        ... )
+
+        Using a pre-built :py:class:`~scores.categorical.BinaryContingencyManager`
+        with weights:
+
+        >>> from scores.categorical import BinaryContingencyManager
+        >>> manager = BinaryContingencyManager(binary_fcst, binary_obs)
+        >>> rev = relative_economic_value_from_contingency(
+        ...     manager,
+        ...     cost_loss_ratios=[0.3, 0.5, 0.7],
+        ...     weights=lat_weights,
+        ... )
+
+    See Also:
+        - :py:func:`relative_economic_value_from_rates`
+        - :py:func:`relative_economic_value_from_threshold`
+        - :py:class:`scores.categorical.BinaryContingencyManager`
+        - :py:class:`scores.categorical.ThresholdEventOperator`
+    """
+    _validate_cost_loss_ratios(cost_loss_ratios)
+
+    if isinstance(cost_loss_ratios, (float, int)):
+        cost_loss_ratios = [cost_loss_ratios]
+
+    if isinstance(contingency_manager, BinaryContingencyManager):
+        basic = contingency_manager.transform(
+            reduce_dims=reduce_dims,
+            preserve_dims=preserve_dims,
+            weights=weights,
+        )
+    else:
+        basic = contingency_manager
+
+    return relative_economic_value_from_rates(
+        pod=basic.hit_rate(),
+        pofd=basic.false_alarm_rate(),
+        climatology=basic.base_rate(),
+        cost_loss_ratios=cost_loss_ratios,
+        cost_loss_dim=cost_loss_dim,
+    )
+
+
+def relative_economic_value_from_threshold(
     fcst: XarrayLike,
     obs: XarrayLike,
     cost_loss_ratios: Union[float, Sequence[float]],
-    *,  # Force keyword arguments to be keyword-only
+    *,
     threshold: Optional[Union[float, Sequence[float]]] = None,
     reduce_dims: Optional[FlexibleDimensionTypes] = None,
     preserve_dims: Optional[FlexibleDimensionTypes] = None,
@@ -492,19 +479,15 @@ def relative_economic_value(
     check_args: bool = True,
 ) -> XarrayLike:
     """
-    Calculates the Relative Economic Value (REV) for probabilistic or binary forecasts.
+    Calculates Relative Economic Value (REV) from forecast and observation arrays.
 
-    REV measures the economic benefit of using a forecast compared to a baseline strategy
-    (climatology), relative to a perfect forecast. It evaluates forecasts across different
-    cost-loss scenarios, where users must decide whether to take protective action based
-    on forecast information.
+    For probabilistic forecasts, multiple decision thresholds are evaluated to find
+    the optimal strategy. For binary forecasts, a single decision has already been
+    made.
 
-    For probabilistic forecasts, multiple decision thresholds are evaluated to find the
-    optimal strategy. For binary forecasts, a single decision has already been made.
-
-    For ensemble forecasts, consider using the scores.processing.binary_discretise_proportion
-    function to convert ensembles to empirical probabilities before calculating REV. See the
-    tutorial notebook for an example.
+    For ensemble forecasts, consider using
+    :py:func:`scores.processing.binary_discretise_proportion` to convert ensembles
+    to empirical probabilities before calculating REV.
 
     .. math::
         \\begin{split}
@@ -514,270 +497,154 @@ def relative_economic_value(
         \\end{split}
 
     where:
-        - :math:`\\bar{o}` is the climatological frequency (base rate) of the event
+        - :math:`\\bar{o}` is the climatological frequency (base rate)
         - :math:`\\alpha` is the cost-loss ratio
         - :math:`F` is the probability of false detection (false alarm rate)
         - :math:`H` is the probability of detection (hit rate)
 
     Args:
         fcst: Forecast data. Can be:
-            - Probabilistic: values between 0 and 1 representing event probabilities
-            - Binary: values of 0 or 1 representing categorical yes/no forecasts
-        obs: Binary observations with values of 0 (no event) or 1 (event occurred).
-        cost_loss_ratios: The cost-loss ratio(s) at which to calculate REV. Must be
-            strictly monotonically increasing values between 0 and 1. The cost-loss
-            ratio represents the ratio of the cost of taking protective action to
-            the loss incurred if the event occurs without protection.
+            - Probabilistic: values between 0 and 1 (requires ``threshold``)
+            - Binary: values of 0 or 1
+        obs: Binary observations (0 or 1).
+        cost_loss_ratios: Cost-loss ratio(s) at which to calculate REV. Must be
+            monotonically increasing values between 0 and 1.
         threshold: Decision threshold(s) for converting probabilistic forecasts to
-            binary decisions. Required for probabilistic forecasts. Each threshold
-            converts forecasts to 1 where fcst >= threshold, 0 otherwise. Must be
-            strictly monotonically increasing values between 0 and 1. If None, assumes
-            fcst is already binary (0 or 1).
-        reduce_dims: Dimensions to reduce when calculating REV. All other dimensions
-            will be preserved. Cannot be used with preserve_dims.
-        preserve_dims: Dimensions to preserve when calculating REV. All other dimensions
-            will be reduced. As a special case, 'all' preserves all dimensions. Cannot
-            be used with reduce_dims.
-        weights: Optional array of weights for weighted averaging. Must be broadcastable
-            to the data dimensions and cannot contain negative or NaN values. Weights
-            need not cover all dimensions being reduced; unweighted averaging is applied
-            to dimensions not in weights.
-        threshold_dim: Name of the threshold dimension in output. Default is 'threshold'.
-            Must not exist as a dimension in fcst or obs.
-        cost_loss_dim: Name of the cost-loss ratio dimension in output. Default is
-            'cost_loss_ratio'. Must not exist as a dimension in fcst or obs.
-        derived_metrics: Optional list of derived metrics to compute. Options are:
-            - 'maximum': Maximum REV across all thresholds (envelope of value curves,
-              also called "potential value")
-            - 'rational_user': REV when threshold equals cost-loss ratio (requires thresholds
-              to match cost_loss_ratios exactly). The user is assuming that the forecast
-              probabilities are reliable.
-            If None and threshold is provided, returns full DataArray with threshold
-            dimension. If None and threshold is None, returns DataArray with
-            cost_loss_ratio dimension only.
-        threshold_outputs: Optional list of specific threshold values to extract as
-            separate variables in the output Dataset. Values must exist in the threshold
-            parameter. Only used when threshold is provided.
+            binary decisions. Each threshold converts forecasts to 1 where
+            fcst >= threshold, 0 otherwise. If None, assumes fcst is already binary.
+        reduce_dims: Dimensions to reduce.
+        preserve_dims: Dimensions to preserve.
+        weights: Optional weights for weighted averaging.
+        threshold_dim: Name of the threshold dimension in output.
+        cost_loss_dim: Name of the cost-loss ratio dimension in output.
+        derived_metrics: Optional list of derived metrics to compute:
+            - ``'maximum'``: Maximum REV across all thresholds.
+            - ``'rational_user'``: REV when threshold equals cost-loss ratio
+              (requires thresholds to match cost_loss_ratios exactly).
+        threshold_outputs: Specific threshold values to extract as separate
+            Dataset variables.
         check_args: If True, validates input arguments.
 
     Returns:
         XarrayLike:
-            - If derived_metrics or threshold_outputs is specified: xr.Dataset with data
-              variables for each requested output
-            - If threshold is provided: xr.DataArray with dimensions from
-              reduce_dims/preserve_dims, plus cost_loss_dim and threshold_dim
-            - If threshold is None: xr.DataArray with dimensions from
-              reduce_dims/preserve_dims, plus cost_loss_dim
+            - If ``derived_metrics`` or ``threshold_outputs``: xr.Dataset
+            - If ``threshold`` is provided: xr.DataArray with threshold_dim
+            - Otherwise: xr.DataArray with cost_loss_dim only
 
     Raises:
-        ValueError: If fcst contains probabilistic values but threshold is None
-        ValueError: If fcst contains values outside [0, 1] when threshold is provided
-        ValueError: If fcst contains values other than 0 or 1 when threshold is None
-        ValueError: If obs contains values other than 0 or 1
-        ValueError: If cost_loss_ratios not strictly monotonically increasing or not in [0, 1]
-        ValueError: If threshold values not strictly monotonically increasing or not in [0, 1]
-        ValueError: If threshold_dim or cost_loss_dim already exist in fcst or obs
-        ValueError: If both reduce_dims and preserve_dims are specified
-        ValueError: If threshold_outputs values are not in threshold parameter
-        ValueError: If 'rational_user' in derived_metrics but thresholds don't match cost_loss_ratios
-
-    Notes:
-        - REV = 1 indicates perfect forecast value (as good as perfect information)
-        - REV = 0 indicates no value over climatology
-        - REV < 0 indicates the forecast is worse than using climatology
-        - For probabilistic forecasts, 'maximum' value represents the maximum achievable
-          value with perfect calibration (max across all decision thresholds)
-        - 'rational_user' represents what a user would achieve by using the forecast probability
-          directly as their decision threshold (only valid when thresholds equal
-          cost-loss ratios). This assumes the forecasts are probabilistically reliable.
-        - Negative REV values can occur with small samples due to random chance, or when
-          forecasts genuinely perform worse than climatology
+        ValueError: For invalid inputs (see parameter descriptions).
 
     References:
-        - Richardson, D. S. (2000). Skill and relative economic value of the ECMWF ensemble
-          prediction system. Quarterly Journal of the Royal Meteorological Society, 126(563),
-          649-667. https://doi.org/10.1002/qj.49712656313
+        - Richardson, D. S. (2000). Skill and relative economic value of the ECMWF
+          ensemble prediction system. *Q. J. R. Meteorol. Soc.*, 126(563), 649-667.
 
     Examples:
-        Calculate REV for binary forecasts:
+        Binary forecasts:
 
-        >>> import xarray as xr
-        >>> from scores.probability import relative_economic_value
-        >>> fcst = xr.DataArray([0, 1, 1, 0, 1], dims=['time'])
-        >>> obs = xr.DataArray([0, 1, 0, 0, 1], dims=['time'])
-        >>> cost_loss_ratios = [0.1, 0.3, 0.5, 0.7, 0.9]
-        >>> rev = relative_economic_value(fcst, obs, cost_loss_ratios)
-
-        Calculate REV for probabilistic forecasts with maximum value:
-
-        >>> fcst_prob = xr.DataArray([0.2, 0.8, 0.6, 0.1, 0.9], dims=['time'])
-        >>> thresholds = [0.3, 0.5, 0.7]
-        >>> result = relative_economic_value(
-        ...     fcst_prob, obs, cost_loss_ratios,
-        ...     threshold=thresholds,
-        ...     derived_metrics=['maximum']
+        >>> rev = relative_economic_value_from_threshold(
+        ...     fcst, obs, cost_loss_ratios=[0.1, 0.3, 0.5, 0.7, 0.9]
         ... )
-        <xarray.Dataset> Size: 80B
-        Dimensions:          (cost_loss_ratio: 5)
-        Coordinates:
-        * cost_loss_ratio  (cost_loss_ratio) float64 40B 0.1 0.3 0.5 0.7 0.9
-        Data variables:
-            maximum          (cost_loss_ratio) float64 40B 1.0 1.0 1.0 1.0 1.0
+
+        Probabilistic forecasts with maximum value:
+
+        >>> result = relative_economic_value_from_threshold(
+        ...     fcst_prob, obs, cost_loss_ratios,
+        ...     threshold=[0.3, 0.5, 0.7],
+        ...     derived_metrics=['maximum'],
+        ... )
 
     See Also:
-        - :py:func:`scores.probability.brier_score`
-        - :py:func:`scores.probability.brier_score_for_ensemble`
-        - :py:func:`scores.categorical.probability_of_detection`
-        - :py:func:`scores.categorical.probability_of_false_detection`
-        - :py:func:`scores.processing.binary_discretise`
+        - :py:func:`relative_economic_value_from_rates`
+        - :py:func:`relative_economic_value_from_contingency`
     """
-
     # Input validation
     if check_args:
-        _validate_rev_inputs(
-            fcst,
-            obs,
-            cost_loss_ratios,
-            threshold,
-            threshold_dim,
-            cost_loss_dim,
-            weights,
-            derived_metrics,
-            threshold_outputs,
+        _validate_threshold_inputs(
+            fcst, obs, cost_loss_ratios, threshold, threshold_dim,
+            cost_loss_dim, weights, derived_metrics, threshold_outputs,
         )
 
+    # --- Dataset dispatch ---
     if isinstance(fcst, xr.Dataset) and isinstance(obs, xr.Dataset):
-        # Align datasets so coords match (drops non-matching coords)
         fcst_aligned, obs_aligned = xr.align(fcst, obs, join="inner")
-
-        # Choose a separator for combined variable names
         name_sep = "__vs__"
-
         result_dict = {}
-        # Cross-product of variables: produce one output variable per pair
         for fvar in sorted(fcst_aligned.data_vars):
             for ovar in sorted(obs_aligned.data_vars):
                 out_name = f"{fvar}{name_sep}{ovar}"
-                # Recurse into scalar-DataArray path; pass check_args=False since
-                # we already validated at top-level
-                result_dict[out_name] = relative_economic_value(
-                    fcst_aligned[fvar],
-                    obs_aligned[ovar],
-                    cost_loss_ratios,
-                    threshold=threshold,
-                    reduce_dims=reduce_dims,
-                    preserve_dims=preserve_dims,
-                    weights=weights,
-                    threshold_dim=threshold_dim,
-                    cost_loss_dim=cost_loss_dim,
+                result_dict[out_name] = relative_economic_value_from_threshold(
+                    fcst_aligned[fvar], obs_aligned[ovar], cost_loss_ratios,
+                    threshold=threshold, reduce_dims=reduce_dims,
+                    preserve_dims=preserve_dims, weights=weights,
+                    threshold_dim=threshold_dim, cost_loss_dim=cost_loss_dim,
                     derived_metrics=derived_metrics,
-                    threshold_outputs=threshold_outputs,
-                    check_args=False,  # Already validated
+                    threshold_outputs=threshold_outputs, check_args=False,
                 )
-
-        result = xr.Dataset(result_dict)
-        return result
+        return xr.Dataset(result_dict)
 
     if isinstance(fcst, xr.Dataset):
         result_dict = {}
         for var in fcst.data_vars:
-            result_dict[var] = relative_economic_value(
-                fcst[var],
-                obs,
-                cost_loss_ratios,
-                threshold=threshold,
-                reduce_dims=reduce_dims,
-                preserve_dims=preserve_dims,
-                weights=weights,
-                threshold_dim=threshold_dim,
-                cost_loss_dim=cost_loss_dim,
+            result_dict[var] = relative_economic_value_from_threshold(
+                fcst[var], obs, cost_loss_ratios,
+                threshold=threshold, reduce_dims=reduce_dims,
+                preserve_dims=preserve_dims, weights=weights,
+                threshold_dim=threshold_dim, cost_loss_dim=cost_loss_dim,
                 derived_metrics=derived_metrics,
-                threshold_outputs=threshold_outputs,
-                check_args=False,  # Already validated
+                threshold_outputs=threshold_outputs, check_args=False,
             )
-        result = xr.Dataset(result_dict)
-        return result
+        return xr.Dataset(result_dict)
 
     if isinstance(obs, xr.Dataset):
         result_dict = {}
         for var in obs.data_vars:
-            result_dict[var] = relative_economic_value(
-                fcst,
-                obs[var],
-                cost_loss_ratios,
-                threshold=threshold,
-                reduce_dims=reduce_dims,
-                preserve_dims=preserve_dims,
-                weights=weights,
-                threshold_dim=threshold_dim,
-                cost_loss_dim=cost_loss_dim,
+            result_dict[var] = relative_economic_value_from_threshold(
+                fcst, obs[var], cost_loss_ratios,
+                threshold=threshold, reduce_dims=reduce_dims,
+                preserve_dims=preserve_dims, weights=weights,
+                threshold_dim=threshold_dim, cost_loss_dim=cost_loss_dim,
                 derived_metrics=derived_metrics,
-                threshold_outputs=threshold_outputs,
-                check_args=False,  # Already validated
+                threshold_outputs=threshold_outputs, check_args=False,
             )
-        result = xr.Dataset(result_dict)
-        return result
+        return xr.Dataset(result_dict)
 
-    # Handle cost-loss ratios
+    # --- Scalar path ---
     if isinstance(cost_loss_ratios, (float, int)):
         cost_loss_ratios = [cost_loss_ratios]
 
-    # Determine dimensions for aggregation
     weights_dims = weights.dims if weights is not None else None
     dims_to_reduce = gather_dimensions(
-        fcst.dims,
-        obs.dims,
+        fcst.dims, obs.dims,
         weights_dims=weights_dims,
         reduce_dims=reduce_dims,
         preserve_dims=preserve_dims,
     )
 
-    # Handle probabilistic vs binary forecasts
     if threshold is not None:
-        # Probabilistic forecast: discretize at multiple thresholds
         if isinstance(threshold, (float, int)):
             threshold = [threshold]
 
-        # Discretize forecasts at each threshold, adding a threshold dim
         binary_fcst = binary_discretise(fcst, threshold, ">=")
 
-        # Rename the threshold dimension if needed
         if threshold_dim != "threshold":
             binary_fcst = binary_fcst.rename({"threshold": threshold_dim})
 
-        # Calculate REV for each threshold
-        # The threshold dimension should be PRESERVED in output
         rev = _calculate_rev_core(
-            binary_fcst,
-            obs,
-            cost_loss_ratios,
-            dims_to_reduce=dims_to_reduce,
-            weights=weights,
+            binary_fcst, obs, cost_loss_ratios,
+            dims_to_reduce=dims_to_reduce, weights=weights,
             cost_loss_dim=cost_loss_dim,
         )
 
-        # Post-process for derived metrics or threshold outputs
         if derived_metrics or threshold_outputs:
-            result = _create_output_dataset(
-                rev,
-                threshold,
-                cost_loss_ratios,
-                derived_metrics,
-                threshold_outputs,
-                threshold_dim,
-                cost_loss_dim,
+            return _create_output_dataset(
+                rev, threshold, cost_loss_ratios, derived_metrics,
+                threshold_outputs, threshold_dim, cost_loss_dim,
             )
-            return result
 
         return rev
 
-    # Assume we already have a binary set of forecasts
-    rev = _calculate_rev_core(
-        fcst,
-        obs,
-        cost_loss_ratios,
-        dims_to_reduce=dims_to_reduce,
-        weights=weights,
+    # Binary forecast path
+    return _calculate_rev_core(
+        fcst, obs, cost_loss_ratios,
+        dims_to_reduce=dims_to_reduce, weights=weights,
     )
-
-    return rev
