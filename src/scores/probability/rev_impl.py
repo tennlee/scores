@@ -560,8 +560,15 @@ def relative_economic_value_from_threshold(
     # Input validation
     if check_args:
         _validate_threshold_inputs(
-            fcst, obs, cost_loss_ratios, threshold, threshold_dim,
-            cost_loss_dim, weights, derived_metrics, threshold_outputs,
+            fcst,
+            obs,
+            cost_loss_ratios,
+            threshold,
+            threshold_dim,
+            cost_loss_dim,
+            weights,
+            derived_metrics,
+            threshold_outputs,
         )
 
     # --- Dataset dispatch ---
@@ -573,12 +580,18 @@ def relative_economic_value_from_threshold(
             for ovar in sorted(obs_aligned.data_vars):
                 out_name = f"{fvar}{name_sep}{ovar}"
                 result_dict[out_name] = relative_economic_value_from_threshold(
-                    fcst_aligned[fvar], obs_aligned[ovar], cost_loss_ratios,
-                    threshold=threshold, reduce_dims=reduce_dims,
-                    preserve_dims=preserve_dims, weights=weights,
-                    threshold_dim=threshold_dim, cost_loss_dim=cost_loss_dim,
+                    fcst_aligned[fvar],
+                    obs_aligned[ovar],
+                    cost_loss_ratios,
+                    threshold=threshold,
+                    reduce_dims=reduce_dims,
+                    preserve_dims=preserve_dims,
+                    weights=weights,
+                    threshold_dim=threshold_dim,
+                    cost_loss_dim=cost_loss_dim,
                     derived_metrics=derived_metrics,
-                    threshold_outputs=threshold_outputs, check_args=False,
+                    threshold_outputs=threshold_outputs,
+                    check_args=False,
                 )
         return xr.Dataset(result_dict)
 
@@ -586,12 +599,18 @@ def relative_economic_value_from_threshold(
         result_dict = {}
         for var in fcst.data_vars:
             result_dict[var] = relative_economic_value_from_threshold(
-                fcst[var], obs, cost_loss_ratios,
-                threshold=threshold, reduce_dims=reduce_dims,
-                preserve_dims=preserve_dims, weights=weights,
-                threshold_dim=threshold_dim, cost_loss_dim=cost_loss_dim,
+                fcst[var],
+                obs,
+                cost_loss_ratios,
+                threshold=threshold,
+                reduce_dims=reduce_dims,
+                preserve_dims=preserve_dims,
+                weights=weights,
+                threshold_dim=threshold_dim,
+                cost_loss_dim=cost_loss_dim,
                 derived_metrics=derived_metrics,
-                threshold_outputs=threshold_outputs, check_args=False,
+                threshold_outputs=threshold_outputs,
+                check_args=False,
             )
         return xr.Dataset(result_dict)
 
@@ -599,12 +618,18 @@ def relative_economic_value_from_threshold(
         result_dict = {}
         for var in obs.data_vars:
             result_dict[var] = relative_economic_value_from_threshold(
-                fcst, obs[var], cost_loss_ratios,
-                threshold=threshold, reduce_dims=reduce_dims,
-                preserve_dims=preserve_dims, weights=weights,
-                threshold_dim=threshold_dim, cost_loss_dim=cost_loss_dim,
+                fcst,
+                obs[var],
+                cost_loss_ratios,
+                threshold=threshold,
+                reduce_dims=reduce_dims,
+                preserve_dims=preserve_dims,
+                weights=weights,
+                threshold_dim=threshold_dim,
+                cost_loss_dim=cost_loss_dim,
                 derived_metrics=derived_metrics,
-                threshold_outputs=threshold_outputs, check_args=False,
+                threshold_outputs=threshold_outputs,
+                check_args=False,
             )
         return xr.Dataset(result_dict)
 
@@ -614,7 +639,8 @@ def relative_economic_value_from_threshold(
 
     weights_dims = weights.dims if weights is not None else None
     dims_to_reduce = gather_dimensions(
-        fcst.dims, obs.dims,
+        fcst.dims,
+        obs.dims,
         weights_dims=weights_dims,
         reduce_dims=reduce_dims,
         preserve_dims=preserve_dims,
@@ -630,21 +656,32 @@ def relative_economic_value_from_threshold(
             binary_fcst = binary_fcst.rename({"threshold": threshold_dim})
 
         rev = _calculate_rev_core(
-            binary_fcst, obs, cost_loss_ratios,
-            dims_to_reduce=dims_to_reduce, weights=weights,
+            binary_fcst,
+            obs,
+            cost_loss_ratios,
+            dims_to_reduce=dims_to_reduce,
+            weights=weights,
             cost_loss_dim=cost_loss_dim,
         )
 
         if derived_metrics or threshold_outputs:
             return _create_output_dataset(
-                rev, threshold, cost_loss_ratios, derived_metrics,
-                threshold_outputs, threshold_dim, cost_loss_dim,
+                rev,
+                threshold,
+                cost_loss_ratios,
+                derived_metrics,
+                threshold_outputs,
+                threshold_dim,
+                cost_loss_dim,
             )
 
         return rev
 
     # Binary forecast path
     return _calculate_rev_core(
-        fcst, obs, cost_loss_ratios,
-        dims_to_reduce=dims_to_reduce, weights=weights,
+        fcst,
+        obs,
+        cost_loss_ratios,
+        dims_to_reduce=dims_to_reduce,
+        weights=weights,
     )

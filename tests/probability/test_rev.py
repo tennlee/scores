@@ -416,7 +416,9 @@ class TestREVSpecialFeatures:
         thresholds = [0.3, 0.5, 0.7]
         cost_loss_ratios = [0.2, 0.5, 0.8]
 
-        actual = relative_economic_value_from_threshold(fcst, obs, cost_loss_ratios, threshold=thresholds, threshold_outputs=[0.5])
+        actual = relative_economic_value_from_threshold(
+            fcst, obs, cost_loss_ratios, threshold=thresholds, threshold_outputs=[0.5]
+        )
         expected = xr.Dataset(
             data_vars={"threshold_0_5": (["cost_loss_ratio"], [1.0, 1.0, 1.0])},
             coords={"cost_loss_ratio": [0.2, 0.5, 0.8]},
@@ -736,7 +738,9 @@ class TestWeights:
         # Cosine weights: lat 60° -> 0.5, lat 30° -> 0.866
         weights = xr.DataArray([0.5, 0.866], dims=["lat"], coords={"lat": [60, 30]})
 
-        actual = relative_economic_value_from_threshold(fcst, obs, cost_loss_ratios=[0.5], weights=weights, preserve_dims=["lon"])
+        actual = relative_economic_value_from_threshold(
+            fcst, obs, cost_loss_ratios=[0.5], weights=weights, preserve_dims=["lon"]
+        )
 
         # Lon=0 weighted calculation (same as previous test):
         #   weighted_H = 2*0.5 + 1*0.866 = 1.866
@@ -1476,7 +1480,9 @@ class TestContingencyManagerPath:
 
         manager = BinaryContingencyManager(fcst, obs)
         actual = relative_economic_value_from_contingency(
-            manager, cost_loss_ratios, weights=weights,
+            manager,
+            cost_loss_ratios,
+            weights=weights,
         )
 
         xr.testing.assert_allclose(actual, expected)
@@ -1501,7 +1507,9 @@ class TestContingencyManagerPath:
 
         manager = BinaryContingencyManager(fcst, obs)
         actual = relative_economic_value_from_contingency(
-            manager, cost_loss_ratios, preserve_dims="space",
+            manager,
+            cost_loss_ratios,
+            preserve_dims="space",
         )
 
         xr.testing.assert_allclose(actual, expected)
@@ -1543,4 +1551,3 @@ class TestContingencyManagerPath:
 
         with pytest.raises(ValueError, match="array values should be between 0 and 1"):
             relative_economic_value_from_contingency(manager, [1.5])
-
