@@ -5,10 +5,12 @@ Contains unit tests for scores.continuous.standard
 # pylint: disable=missing-function-docstring
 # pylint: disable=line-too-long
 
+import math
 import numpy as np
 import pandas as pd
 import pytest
 import torch
+import xarray as xr
 
 import scores
 
@@ -31,31 +33,67 @@ BIAS_WEIGHTS = torch.tensor(
 EXP_BIAS2 = torch.tensor(np.array([-1.33333])).float()
 EXP_BIAS3 = torch.tensor(np.array(-1.625)).float()
 
+@pytest.fixture(params=[True, False])
+def mse_test_args(request):
+    is_angular = request.param
+    args = {
+        "fcst": [180*i/math.pi if is_angular else i for i in [1, 3, 1, 3, 2, 2, 2, 1, 1, 2, 3]],
+        "obs": [180*i/math.pi if is_angular else i for i in [1, 1, 1, 2, 1, 2, 1, 1, 1, 3, 1]],
+        "is_angular": is_angular
+    }
+    args["expected"] = float(scores.continuous.mse(
+        xr.DataArray(args["fcst"]),
+        xr.DataArray(args["obs"]),
+        is_angular = args["is_angular"]
+    ))
+    return args
 
-def test_mse_series():
+
+@pytest.mark.parametrize(
+    ("device",),
+    [
+        pytest.param(
+            device, 
+            marks=pytest.mark.skipif(
+                not getattr(torch, device).is_available(),
+                reason=f"torch device {device} not available."
+            )
+        ) for device in ("cpu", "cuda", "mps")
+    ]
+)
+def test_mse_torch_host_device_consistency(mse_test_args, device):
     """
-    Test calculation works correctly on pandas series
+    Tests that execution on available devices match host
+    serial answers within tolerance.
     """
 
-    fcst_pd_series = pd.Series([1, 3, 1, 3, 2, 2, 2, 1, 1, 2, 3])
-    obs_pd_series = pd.Series([1, 1, 1, 2, 1, 2, 1, 1, 1, 3, 1])
+    fcst = mse_test_args["fcst"]
+    obs = mse_test_args["obs"]
+    expected = mse_test_args["expected"]
 
-    fcst_tensor = torch.tensor([1.0, 3, 1, 3, 2, 2, 2, 1, 1, 2, 3])
-    obs_tensor = torch.tensor([1.0, 1, 1, 2, 1, 2, 1, 1, 1, 3, 1])
+    fcst_tensor = torch.tensor(fcst, dtype=torch.float).to(device)
+    obs_tensor = torch.tensor(obs, dtype=torch.float).to(device)
+    device_result = scores.loss.mse(fcst_tensor, obs_tensor)
+    assert isinstance(device_result, torch.Tensor)
+    assert device_result.device == fcst_tensor.device
+    torch.testing.assert_close(
+        device_result, 
+        torch.tensor(expected, device=device),
+    )
 
-    expected = 1.0909
-    pd_result = scores.continuous.mse(fcst_pd_series, obs_pd_series)
-    assert isinstance(pd_result, float)
-    assert round(pd_result, 4) == expected
 
-    tensor_result = scores.loss.mse(fcst_tensor, obs_tensor)
-    assert tensor_result.dtype is torch.float
-    assert torch.round(tensor_result, decimals=4) == torch.tensor(expected)
-
-    fcst_gpu = fcst_tensor.to(device="mps")
-    obs_gpu = obs_tensor.to(device="mps")
-    _gpu_result = scores.loss.mse(fcst_gpu, obs_gpu)
-
+@pytest.mark.parametrize(
+    ("arr_type", ),
+    [(np.array,), (pd.Series,)],
+)
+def test_mse_array_consistency(arr_type, mse_test_args):
+    """
+    Tests that different numpy-like arrays give the same result.
+    """
+    fcst = arr_type(mse_test_args["fcst"])
+    obs = arr_type(mse_test_args["obs"])
+    result = scores.loss.mse(fcst, obs)
+    np.testing.assert_allclose(mse_test_args["expected"], result)
 
 @pytest.mark.parametrize(
     ("fcst", "obs", "weights", "expected"),

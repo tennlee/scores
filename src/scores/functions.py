@@ -7,7 +7,8 @@ from typing import overload
 import numpy as np
 import xarray as xr
 
-from scores.typing import XarrayLike
+from scores.typing import XarrayLike, is_xarraylike
+from array_api_compat import is_array_api_obj
 
 
 def create_latitude_weights(latitudes):
@@ -51,6 +52,12 @@ def angular_difference(source_a: XarrayLike, source_b: XarrayLike) -> XarrayLike
     Returns:
         An array containing angles within the range [0, 180].
     """
-    difference = np.abs(source_a - source_b) % 360
+    if is_xarraylike(source_a) and is_xarraylike(source_b):
+        difference = np.abs(source_a - source_b) % 360
+    elif is_array_api_obj(source_a) and is_array_api_obj(source_b):
+        difference = (source_a - source_b).abs() % 360
+    else:
+        raise TypeError("source_a and source_b must both be either an xarray type or a supported array API object." \
+        f"source_a: {type(source_a)}, source_b: {type(source_b)}")
     difference = difference.where(difference <= 180, 360 - difference)
     return difference
