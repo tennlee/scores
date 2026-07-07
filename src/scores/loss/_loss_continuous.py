@@ -7,6 +7,7 @@ def mse(
     obs,
     *,  # Force keywords arguments to be keyword-only
     is_angular: bool = False,
+    weights = None,
 ):
     """Calculates the mean squared error from forecast and observed data.
 
@@ -36,7 +37,7 @@ def mse(
             error for the supplied data. All dimensions will be reduced.
 
     """
-    return __continuous.mse(fcst, obs, is_angular=is_angular)
+    return __continuous.mse(fcst, obs, is_angular=is_angular, weights=weights)
 
 
 def additive_bias(
