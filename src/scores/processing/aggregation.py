@@ -146,7 +146,7 @@ def _weighted_mean(values, weights, reduce_dims=None):
     # Else attempt to handle with array compatibility
     else:
         xp = array_api_compat.array_namespace(values, weights)
-        weighted_error = xp.mul(values, weights)
+        weighted_error = xp.multiply(values, weights)
         weighted_sum_of_error = xp.nansum(weighted_error)
         sum_of_weights = xp.nansum(weights)
         weighted_mean = weighted_sum_of_error / sum_of_weights
