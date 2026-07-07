@@ -8,6 +8,7 @@ import numpy as np
 import xarray as xr
 
 from scores.typing import XarrayLike, is_xarraylike
+import array_api_compat
 from array_api_compat import is_array_api_obj
 
 
@@ -54,10 +55,12 @@ def angular_difference(source_a: XarrayLike, source_b: XarrayLike) -> XarrayLike
     """
     if is_xarraylike(source_a) and is_xarraylike(source_b):
         difference = np.abs(source_a - source_b) % 360
+        difference = difference.where(difference <= 180, 360 - difference)
     elif is_array_api_obj(source_a) and is_array_api_obj(source_b):
-        difference = (source_a - source_b).abs() % 360
+        xp = array_api_compat.array_namespace(source_a, source_b)
+        difference = xp.abs(source_a - source_b) % 360
+        difference = xp.where(difference <= 180, difference, 360 - difference)
     else:
         raise TypeError("source_a and source_b must both be either an xarray type or a supported array API object." \
         f"source_a: {type(source_a)}, source_b: {type(source_b)}")
-    difference = difference.where(difference <= 180, 360 - difference)
     return difference
