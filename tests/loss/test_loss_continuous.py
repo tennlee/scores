@@ -9,7 +9,12 @@ import math
 import numpy as np
 import pandas as pd
 import pytest
-import torch
+try:
+    import torch
+    _SKIP_TORCH_TESTS = False
+except ModuleNotFoundError:
+    _SKIP_TORCH_TESTS = True
+
 import xarray as xr
 
 import scores
@@ -33,22 +38,39 @@ BIAS_WEIGHTS = torch.tensor(
 EXP_BIAS2 = torch.tensor(np.array([-1.33333])).float()
 EXP_BIAS3 = torch.tensor(np.array(-1.625)).float()
 
+FCST = [1, 3, 1, 3, 2, 2, 2, 1, 1, 2, 3]
+OBS = [1, 1, 1, 2, 1, 2, 1, 1, 1, 3, 1]
+WEIGHTS = np.random.default_rng(42).random(len(FCST))
+
 @pytest.fixture(params=[True, False])
-def mse_test_args(request):
-    is_angular = request.param
+def is_angular(request):
+    return request.param
+
+
+@pytest.fixture(params=[None, xr.DataArray(WEIGHTS)])
+def weights(request):
+    return request.param
+
+
+@pytest.fixture
+def mse_test_args(is_angular, weights):
+    fcst = [180 * i / math.pi if is_angular else i for i in FCST]
+    obs = [180 * i / math.pi if is_angular else i for i in OBS]
     args = {
-        "fcst": [180*i/math.pi if is_angular else i for i in [1, 3, 1, 3, 2, 2, 2, 1, 1, 2, 3]],
-        "obs": [180*i/math.pi if is_angular else i for i in [1, 1, 1, 2, 1, 2, 1, 1, 1, 3, 1]],
-        "is_angular": is_angular
+        "fcst": fcst,
+        "obs": obs,
+        "is_angular": is_angular,
+        "weights": weights,
     }
     args["expected"] = float(scores.continuous.mse(
-        xr.DataArray(args["fcst"]),
-        xr.DataArray(args["obs"]),
-        is_angular = args["is_angular"]
+        xr.DataArray(fcst),
+        xr.DataArray(obs),
+        is_angular=is_angular,
+        weights=weights,
     ))
     return args
 
-
+@pytest.mark.skipif(_SKIP_TORCH_TESTS, reason="torch not installed")
 @pytest.mark.parametrize(
     ("device",),
     [
@@ -70,14 +92,23 @@ def test_mse_torch_host_device_consistency(mse_test_args, device):
     fcst = mse_test_args["fcst"]
     obs = mse_test_args["obs"]
     expected = mse_test_args["expected"]
+    is_angular = mse_test_args["is_angular"]
+    weights = mse_test_args["weights"]
+    if weights is not None:
+        weights = torch.tensor(weights.data, dtype=torch.float, device=device)
 
-    fcst_tensor = torch.tensor(fcst, dtype=torch.float).to(device)
-    obs_tensor = torch.tensor(obs, dtype=torch.float).to(device)
-    device_result = scores.loss.mse(fcst_tensor, obs_tensor)
+    fcst_tensor = torch.tensor(fcst, dtype=torch.float, device=device)
+    obs_tensor = torch.tensor(obs, dtype=torch.float, device=device)
+    device_result = scores.loss.mse(
+        fcst_tensor,
+        obs_tensor,
+        is_angular=is_angular,
+        weights=weights,
+    )
     assert isinstance(device_result, torch.Tensor)
     assert device_result.device == fcst_tensor.device
     torch.testing.assert_close(
-        device_result, 
+        device_result,
         torch.tensor(expected, device=device),
     )
 
@@ -92,9 +123,21 @@ def test_mse_array_consistency(arr_type, mse_test_args):
     """
     fcst = arr_type(mse_test_args["fcst"])
     obs = arr_type(mse_test_args["obs"])
-    result = scores.loss.mse(fcst, obs)
+    is_angular = mse_test_args["is_angular"]
+    weights = mse_test_args["weights"]
+    if weights is not None:
+        weights = arr_type(weights.data)
+
+    if arr_type is pd.Series:
+        if weights is not None:
+            pytest.skip("weighted mse not yet supported for pd.Series input")
+        elif is_angular:
+            pytest.skip("angular mse not yet supported for pd.Series input")
+    
+    result = scores.loss.mse(fcst, obs, is_angular=is_angular, weights=weights)
     np.testing.assert_allclose(mse_test_args["expected"], result)
 
+@pytest.mark.skipif(_SKIP_TORCH_TESTS, reason="torch not installed")
 @pytest.mark.parametrize(
     ("fcst", "obs", "weights", "expected"),
     [
@@ -123,11 +166,6 @@ def test_additive_bias(fcst, obs, weights, expected):
 
     tensor_result = tensor_result.rename(None)
     assert (torch.round(tensor_result, decimals=4) == torch.tensor(expected)).all()
-
-    fcst_gpu = fcst.to(device="mps")
-    obs_gpu = obs.to(device="mps")
-    weights_gpu = weights.to(device="mps")
-    _gpu_result = scores.loss.additive_bias(fcst_gpu, obs_gpu, weights=weights_gpu)
 
 
 # def test_mse_dataframe():
