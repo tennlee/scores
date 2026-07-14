@@ -115,7 +115,13 @@ def aggregate(
         case "mean":
             if weights is not None:
                 return _weighted_mean(values, weights, reduce_dims)
-            return values.mean(reduce_dims)
+            if array_api_compat.is_array_api_obj(values):
+                xp = array_api_compat.array_namespace(values)
+                # nanmean not part of the array API standard, but all
+                # relevant members implement it.
+                return xp.nanmean(values, reduce_dims)
+            else:
+                return values.mean(reduce_dims)
         case "sum":
             if weights is not None:
                 return _weighted_sum(values, weights, reduce_dims)
@@ -144,11 +150,28 @@ def _weighted_mean(values, weights, reduce_dims=None):
         return values.mean(reduce_dims)
 
     # Else attempt to handle with array compatibility
+    # xarray mean behaviour to be replicated:
+    # * when encountering nan in `values`, element is excluded from both numerator
+    #   and corresponding element in `weights` is excluded from denominator.
+    # * when encountering nan in `weights`, function raises exception.
     else:
         xp = array_api_compat.array_namespace(values, weights)
+        # TODO: check that weights are >= 0
+        if bool(xp.any(xp.isnan(weights))):
+            raise ValueError("""
+You have specified invalid weights. The weights must be >= 0, with at least one
+strictly positive weight.""")
         weighted_error = xp.multiply(values, weights)
         weighted_sum_of_error = xp.nansum(weighted_error)
-        sum_of_weights = xp.nansum(weights)
+        sum_of_weights = xp.sum(
+            xp.where(
+                xp.isnan(values),
+                xp.zeros(1,
+                         dtype=weights.dtype,
+                         device=values.device),
+                weights
+            )
+        )
         weighted_mean = weighted_sum_of_error / sum_of_weights
         return weighted_mean
 

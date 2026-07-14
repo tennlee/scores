@@ -80,7 +80,6 @@ def additive_bias(
 
     """
 
-    error = fcst - obs
-    score = scores.processing.aggregate(error, reduce_dims="all", weights=weights)
+    score = __continuous.additive_bias(fcst, obs, weights=weights)
 
     return score

@@ -20,6 +20,9 @@ except ModuleNotFoundError:
 
 import scores
 from tests.continuous.mse_bias_test_data import (
+    BIAS_FCST_DA,
+    BIAS_OBS_DA,
+    BIAS_WEIGHTS_DA,
     MSE_FCST_DA,
     MSE_OBS_DA,
     MSE_WEIGHTS_DA,
@@ -29,20 +32,6 @@ PRECISION = 4
 
 # Mean Squared Error
 #
-DA1_BIAS = torch.tensor(
-    np.array([[1, 1, np.nan], [0, 0, 0], [0.5, -0.5, 0.5]]),
-).float()
-
-DA2_BIAS = torch.tensor(
-    np.array([[2, 2, 6], [2, 10, 0], [-0.5, 0.5, -0.5]]),
-).float()
-
-BIAS_WEIGHTS = torch.tensor(
-    np.array([[1, 1, 1], [3, 0, 0], [3, 0, 0]]),
-).float()
-
-EXP_BIAS2 = torch.tensor(np.array([-1.33333])).float()
-EXP_BIAS3 = torch.tensor(np.array(-1.625)).float()
 
 TEST_DEVICE_PARAMS = [
     pytest.param(
@@ -144,35 +133,39 @@ def test_mse_array_consistency(arr_type, mse_test_args):
     np.testing.assert_allclose(mse_test_args["expected"], result)
 
 
+@pytest.fixture(params=[None, BIAS_WEIGHTS_DA])
+def additive_bias_expected(request):
+    weights = request.param
+    return weights, float(scores.continuous.additive_bias(
+        BIAS_FCST_DA,
+        BIAS_OBS_DA,
+        weights=weights,
+    ).data)
+
 @pytest.mark.skipif(_SKIP_TORCH_TESTS, reason="torch not installed")
 @pytest.mark.parametrize(
-    ("fcst", "obs", "weights", "expected"),
-    [
-        # Check weighting works
-        # (DA1_BIAS, DA2_BIAS, BIAS_WEIGHTS, EXP_BIAS2),
-        (DA1_BIAS, DA2_BIAS, None, EXP_BIAS3),
-    ],
+    ("device",),
+    TEST_DEVICE_PARAMS
 )
-def test_additive_bias(fcst, obs, weights, expected):
+def test_additive_bias_torch_host_device_consistency(additive_bias_expected, device):
     """
-    Tests continuous.additive_bias
-    Also tests mean_error (which is an identical function)
+    Tests loss.additive_bias that execution on available devices match host
+    serial answers within tolerance.
     """
-
-    fcst = fcst.rename(None)
-    obs = obs.rename(None)
-
-    if weights is None:
-        weights = torch.ones(fcst.shape)
-
-    weights = weights.rename(None)
-
-    weights = weights * (~torch.isnan(fcst))  # mask out nans from fcst
-    weights = weights * (~torch.isnan(obs))  # mask out nans from obs
-    tensor_result = scores.loss.additive_bias(fcst, obs, weights=weights)
-
-    tensor_result = tensor_result.rename(None)
-    assert (torch.round(tensor_result, decimals=4) == torch.tensor(expected)).all()
+    weights, expected = additive_bias_expected
+    if weights is not None:
+        weights = torch.tensor(weights.values, dtype=torch.float, device=device)
+    fcst, obs = tuple(
+        torch.tensor(obj, dtype=torch.float, device=device)
+        for obj in (BIAS_FCST_DA.values, BIAS_OBS_DA.values)
+    )
+    result = scores.loss.additive_bias(fcst, obs, weights=weights)
+    assert isinstance(result, torch.Tensor)
+    assert result.device == fcst.device
+    torch.testing.assert_close(
+        result,
+        torch.tensor(expected, device=device)
+    )
 
 
 # def test_mse_dataframe():
