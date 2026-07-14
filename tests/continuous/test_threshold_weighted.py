@@ -30,21 +30,11 @@ from scores.continuous.threshold_weighted_impl import (
     tw_quantile_score,
     tw_squared_error,
 )
-
-DA_FCST = xr.DataArray(
-    data=[[[3.0, 1.0, nan, 2], [3.0, 1.0, nan, 2]], [[-4.0, 0.0, 1.0, 2], [-4.0, 0.0, 1.0, 2]]],
-    dims=["date", "lead_day", "station"],
-    coords=dict(
-        date=["1", "2"],
-        lead_day=[1, 1],
-        station=[100, 101, 102, 0],
-    ),
+from tests.continuous.continuous_test_data import (
+    TW_FCST_DA as DA_FCST,
 )
-
-DA_OBS = xr.DataArray(
-    data=[[nan, 3.0, 5.0], [-4.0, 10.0, -1.0], [3.0, 2.0, -0.2]],
-    dims=["date", "station"],
-    coords=dict(date=["1", "2", "3"], station=[100, 101, 102]),
+from tests.continuous.continuous_test_data import (
+    TW_OBS_DA as DA_OBS,
 )
 
 # Mimic DA_OBS for rectangular threshold weight

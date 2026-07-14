@@ -35,3 +35,19 @@ BIAS_WEIGHTS_DA = xr.DataArray(
     dims=("space", "time"),
     coords=_BIAS_COORDS,
 )
+
+TW_FCST_DA = xr.DataArray(
+    data=[[[3.0, 1.0, np.nan, 2], [3.0, 1.0, np.nan, 2]], [[-4.0, 0.0, 1.0, 2], [-4.0, 0.0, 1.0, 2]]],
+    dims=["date", "lead_day", "station"],
+    coords=dict(
+        date=["1", "2"],
+        lead_day=[1, 1],
+        station=[100, 101, 102, 0],
+    ),
+)
+
+TW_OBS_DA = xr.DataArray(
+    data=[[np.nan, 3.0, 5.0], [-4.0, 10.0, -1.0], [3.0, 2.0, -0.2]],
+    dims=["date", "station"],
+    coords=dict(date=["1", "2", "3"], station=[100, 101, 102]),
+)

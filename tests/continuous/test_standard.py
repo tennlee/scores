@@ -19,16 +19,16 @@ import pytest
 import xarray as xr
 
 import scores.continuous
-from tests.continuous.mse_bias_test_data import (
+from tests.continuous.continuous_test_data import (
     BIAS_FCST_DA as DA1_BIAS,
 )
-from tests.continuous.mse_bias_test_data import (
+from tests.continuous.continuous_test_data import (
     BIAS_OBS_DA as DA2_BIAS,
 )
-from tests.continuous.mse_bias_test_data import (
+from tests.continuous.continuous_test_data import (
     BIAS_WEIGHTS_DA as BIAS_WEIGHTS,
 )
-from tests.continuous.mse_bias_test_data import (
+from tests.continuous.continuous_test_data import (
     MSE_FCST_DA,
     MSE_OBS_DA,
 )

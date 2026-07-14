@@ -19,7 +19,7 @@ except ModuleNotFoundError:
     _SKIP_TORCH_TESTS = True
 
 import scores
-from tests.continuous.mse_bias_test_data import (
+from tests.continuous.continuous_test_data import (
     BIAS_FCST_DA,
     BIAS_OBS_DA,
     BIAS_WEIGHTS_DA,
