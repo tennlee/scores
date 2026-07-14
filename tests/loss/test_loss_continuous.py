@@ -6,18 +6,24 @@ Contains unit tests for scores.continuous.standard
 # pylint: disable=line-too-long
 
 import math
+
 import numpy as np
 import pandas as pd
 import pytest
+
 try:
     import torch
+
     _SKIP_TORCH_TESTS = False
 except ModuleNotFoundError:
     _SKIP_TORCH_TESTS = True
 
-import xarray as xr
-
 import scores
+from tests.continuous.mse_bias_test_data import (
+    MSE_FCST_DA,
+    MSE_OBS_DA,
+    MSE_WEIGHTS_DA,
+)
 
 PRECISION = 4
 
@@ -38,51 +44,51 @@ BIAS_WEIGHTS = torch.tensor(
 EXP_BIAS2 = torch.tensor(np.array([-1.33333])).float()
 EXP_BIAS3 = torch.tensor(np.array(-1.625)).float()
 
-FCST = [1, 3, 1, 3, 2, 2, 2, 1, 1, 2, 3]
-OBS = [1, 1, 1, 2, 1, 2, 1, 1, 1, 3, 1]
-WEIGHTS = np.random.default_rng(42).random(len(FCST))
+TEST_DEVICE_PARAMS = [
+    pytest.param(
+        device,
+        marks=pytest.mark.skipif(
+            not getattr(torch, device).is_available(), reason=f"torch device {device} not available."
+        ),
+    )
+    for device in ("cpu", "cuda", "mps")
+]
+
 
 @pytest.fixture(params=[True, False])
 def is_angular(request):
     return request.param
 
 
-@pytest.fixture(params=[None, xr.DataArray(WEIGHTS)])
+@pytest.fixture(params=[None, MSE_WEIGHTS_DA])
 def weights(request):
     return request.param
 
 
 @pytest.fixture
 def mse_test_args(is_angular, weights):
-    fcst = [180 * i / math.pi if is_angular else i for i in FCST]
-    obs = [180 * i / math.pi if is_angular else i for i in OBS]
+    scale = 180.0 / math.pi if is_angular else 1.0
+    fcst = scale * MSE_FCST_DA
+    obs = scale * MSE_OBS_DA
     args = {
-        "fcst": fcst,
-        "obs": obs,
+        "fcst": fcst.values,
+        "obs": obs.values,
         "is_angular": is_angular,
-        "weights": weights,
+        "weights": weights if weights is None else weights.values,
+        "expected": float(
+            scores.continuous.mse(
+                fcst,
+                obs,
+                is_angular=is_angular,
+                weights=weights,
+            )
+        ),
     }
-    args["expected"] = float(scores.continuous.mse(
-        xr.DataArray(fcst),
-        xr.DataArray(obs),
-        is_angular=is_angular,
-        weights=weights,
-    ))
     return args
 
+
 @pytest.mark.skipif(_SKIP_TORCH_TESTS, reason="torch not installed")
-@pytest.mark.parametrize(
-    ("device",),
-    [
-        pytest.param(
-            device, 
-            marks=pytest.mark.skipif(
-                not getattr(torch, device).is_available(),
-                reason=f"torch device {device} not available."
-            )
-        ) for device in ("cpu", "cuda", "mps")
-    ]
-)
+@pytest.mark.parametrize(("device",), TEST_DEVICE_PARAMS)
 def test_mse_torch_host_device_consistency(mse_test_args, device):
     """
     Tests that execution on available devices match host
@@ -95,7 +101,7 @@ def test_mse_torch_host_device_consistency(mse_test_args, device):
     is_angular = mse_test_args["is_angular"]
     weights = mse_test_args["weights"]
     if weights is not None:
-        weights = torch.tensor(weights.data, dtype=torch.float, device=device)
+        weights = torch.tensor(weights, dtype=torch.float, device=device)
 
     fcst_tensor = torch.tensor(fcst, dtype=torch.float, device=device)
     obs_tensor = torch.tensor(obs, dtype=torch.float, device=device)
@@ -114,7 +120,7 @@ def test_mse_torch_host_device_consistency(mse_test_args, device):
 
 
 @pytest.mark.parametrize(
-    ("arr_type", ),
+    ("arr_type",),
     [(np.array,), (pd.Series,)],
 )
 def test_mse_array_consistency(arr_type, mse_test_args):
@@ -126,16 +132,17 @@ def test_mse_array_consistency(arr_type, mse_test_args):
     is_angular = mse_test_args["is_angular"]
     weights = mse_test_args["weights"]
     if weights is not None:
-        weights = arr_type(weights.data)
+        weights = arr_type(weights)
 
     if arr_type is pd.Series:
         if weights is not None:
             pytest.skip("weighted mse not yet supported for pd.Series input")
         elif is_angular:
             pytest.skip("angular mse not yet supported for pd.Series input")
-    
+
     result = scores.loss.mse(fcst, obs, is_angular=is_angular, weights=weights)
     np.testing.assert_allclose(mse_test_args["expected"], result)
+
 
 @pytest.mark.skipif(_SKIP_TORCH_TESTS, reason="torch not installed")
 @pytest.mark.parametrize(

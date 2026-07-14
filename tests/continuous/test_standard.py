@@ -19,6 +19,19 @@ import pytest
 import xarray as xr
 
 import scores.continuous
+from tests.continuous.mse_bias_test_data import (
+    BIAS_FCST_DA as DA1_BIAS,
+)
+from tests.continuous.mse_bias_test_data import (
+    BIAS_OBS_DA as DA2_BIAS,
+)
+from tests.continuous.mse_bias_test_data import (
+    BIAS_WEIGHTS_DA as BIAS_WEIGHTS,
+)
+from tests.continuous.mse_bias_test_data import (
+    MSE_FCST_DA,
+    MSE_OBS_DA,
+)
 
 PRECISION = 4
 
@@ -29,9 +42,7 @@ def test_mse_xarray_1d():
     """
     Test both value and expected datatype matches for xarray calculation
     """
-    fcst_as_xarray_1d = xr.DataArray([1, 3, 1, 3, 2, 2, 2, 1, 1, 2, 3])
-    obs_as_xarray_1d = xr.DataArray([1, 1, 1, 2, 1, 2, 1, 1, 1, 3, 1])
-    result = scores.continuous.mse(fcst_as_xarray_1d, obs_as_xarray_1d)
+    result = scores.continuous.mse(MSE_FCST_DA, MSE_OBS_DA)
 
     expected = xr.DataArray(1.0909)
 
@@ -44,8 +55,8 @@ def test_mse_pandas_series():
     Test calculation works correctly on pandas series
     """
 
-    fcst_pd_series = pd.Series([1, 3, 1, 3, 2, 2, 2, 1, 1, 2, 3])
-    obs_pd_series = pd.Series([1, 1, 1, 2, 1, 2, 1, 1, 1, 3, 1])
+    fcst_pd_series = pd.Series(MSE_FCST_DA.values)
+    obs_pd_series = pd.Series(MSE_OBS_DA.values)
     expected = 1.0909
     result = scores.continuous.mse(fcst_pd_series, obs_pd_series)
     assert isinstance(result, float)
@@ -57,8 +68,8 @@ def test_mse_dataframe():
     Test calculation works correctly on dataframe columns
     """
 
-    fcst_pd_series = pd.Series([1, 3, 1, 3, 2, 2, 2, 1, 1, 2, 3])
-    obs_pd_series = pd.Series([1, 1, 1, 2, 1, 2, 1, 1, 1, 3, 1])
+    fcst_pd_series = pd.Series(MSE_FCST_DA.values)
+    obs_pd_series = pd.Series(MSE_OBS_DA.values)
     df = pd.DataFrame({"fcst": fcst_pd_series, "obs": obs_pd_series})
     expected = 1.0909
     result = scores.continuous.mse(df["fcst"], df["obs"])
@@ -556,34 +567,8 @@ def test_rmse_angular():
     xr.testing.assert_equal(result, expected)
 
 
-DA1_BIAS = xr.DataArray(
-    np.array([[1, 1, np.nan], [0, 0, 0], [0.5, -0.5, 0.5]]),
-    dims=("space", "time"),
-    coords=[
-        ("space", ["w", "x", "y"]),
-        ("time", [1, 2, 3]),
-    ],
-)
-
-DA2_BIAS = xr.DataArray(
-    np.array([[2, 2, 6], [2, 10, 0], [-0.5, 0.5, -0.5]]),
-    dims=("space", "time"),
-    coords=[
-        ("space", ["w", "x", "y"]),
-        ("time", [1, 2, 3]),
-    ],
-)
-
 DA3_BIAS = xr.DataArray(
     np.array([[2, 2, 6], [2, 10, 0], [2, 0.5, -0.5]]),
-    dims=("space", "time"),
-    coords=[
-        ("space", ["w", "x", "y"]),
-        ("time", [1, 2, 3]),
-    ],
-)
-BIAS_WEIGHTS = xr.DataArray(
-    np.array([[1, 1, 1], [3, 0, 0], [3, 0, 0]]),
     dims=("space", "time"),
     coords=[
         ("space", ["w", "x", "y"]),
