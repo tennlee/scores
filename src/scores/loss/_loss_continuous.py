@@ -1,4 +1,3 @@
-import scores
 from scores import continuous as __continuous
 
 
@@ -7,7 +6,7 @@ def mse(
     obs,
     *,  # Force keywords arguments to be keyword-only
     is_angular: bool = False,
-    weights = None,
+    weights=None,
 ):
     """Calculates the mean squared error from forecast and observed data.
 

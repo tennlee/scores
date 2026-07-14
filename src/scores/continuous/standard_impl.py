@@ -6,6 +6,7 @@ from typing import Optional, Union
 
 import numpy as np
 import xarray as xr
+from array_api_compat import is_array_api_obj
 
 import scores.functions
 import scores.utils
@@ -16,7 +17,6 @@ from scores.typing import (
     XarrayLike,
     is_xarraylike,
 )
-from array_api_compat import is_array_api_obj
 
 
 def mse(
@@ -133,11 +133,7 @@ def mse(
         if preserve_dims is not None:
             raise ValueError("preserve_dims is not supported for generic arrays.")
         # TODO: Implement reduce_dims and preserve_dims for compat arrs.
-        reduce_dims = tuple(
-            scores.utils.gather_dimensions(
-                range(len(fcst.shape)), range(len(obs.shape))
-            )
-        )
+        reduce_dims = tuple(scores.utils.gather_dimensions(range(len(fcst.shape)), range(len(obs.shape))))
 
     if is_angular:
         error = scores.functions.angular_difference(fcst, obs)

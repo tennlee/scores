@@ -136,17 +136,17 @@ def test_mse_array_consistency(arr_type, mse_test_args):
 @pytest.fixture(params=[None, BIAS_WEIGHTS_DA])
 def additive_bias_expected(request):
     weights = request.param
-    return weights, float(scores.continuous.additive_bias(
-        BIAS_FCST_DA,
-        BIAS_OBS_DA,
-        weights=weights,
-    ).data)
+    return weights, float(
+        scores.continuous.additive_bias(
+            BIAS_FCST_DA,
+            BIAS_OBS_DA,
+            weights=weights,
+        ).data
+    )
+
 
 @pytest.mark.skipif(_SKIP_TORCH_TESTS, reason="torch not installed")
-@pytest.mark.parametrize(
-    ("device",),
-    TEST_DEVICE_PARAMS
-)
+@pytest.mark.parametrize(("device",), TEST_DEVICE_PARAMS)
 def test_additive_bias_torch_host_device_consistency(additive_bias_expected, device):
     """
     Tests loss.additive_bias that execution on available devices match host
@@ -156,16 +156,12 @@ def test_additive_bias_torch_host_device_consistency(additive_bias_expected, dev
     if weights is not None:
         weights = torch.tensor(weights.values, dtype=torch.float, device=device)
     fcst, obs = tuple(
-        torch.tensor(obj, dtype=torch.float, device=device)
-        for obj in (BIAS_FCST_DA.values, BIAS_OBS_DA.values)
+        torch.tensor(obj, dtype=torch.float, device=device) for obj in (BIAS_FCST_DA.values, BIAS_OBS_DA.values)
     )
     result = scores.loss.additive_bias(fcst, obs, weights=weights)
     assert isinstance(result, torch.Tensor)
     assert result.device == fcst.device
-    torch.testing.assert_close(
-        result,
-        torch.tensor(expected, device=device)
-    )
+    torch.testing.assert_close(result, torch.tensor(expected, device=device))
 
 
 # def test_mse_dataframe():
