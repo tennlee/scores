@@ -8,6 +8,7 @@ from typing import Callable, Optional, Tuple, Union
 
 import numpy as np
 import xarray as xr
+from array_api_compat import array_namespace, is_array_api_obj
 
 from scores.continuous.consistent_impl import (
     check_alpha,
@@ -16,7 +17,7 @@ from scores.continuous.consistent_impl import (
     consistent_huber_score,
     consistent_quantile_score,
 )
-from scores.typing import FlexibleDimensionTypes
+from scores.typing import FlexibleDimensionTypes, is_xarraylike
 
 AuxFuncType = Callable[[xr.DataArray], xr.DataArray]
 EndpointType = Union[int, float, xr.DataArray]
@@ -175,9 +176,16 @@ def _g_j_rect(a: EndpointType, b: EndpointType, x: xr.DataArray) -> xr.DataArray
     result2 = x - a
     result3 = b - a
 
+    if is_array_api_obj(x):
+        xp = array_namespace(x)
+        isnan = xp.isnan
+    elif is_xarraylike(x):
+        isnan = np.isnan
+    else:
+        raise TypeError
     result = result2.where(x < b, result3)
     result = result.where(x >= a, result1)
-    result = result.where(~np.isnan(x), np.nan)
+    result = result.where(~isnan(x), np.nan)
 
     return result
 
@@ -208,9 +216,17 @@ def _phi_j_rect(a: EndpointType, b: EndpointType, x: xr.DataArray) -> xr.DataArr
     result2 = 2 * (x - a) ** 2
     result3 = 4 * (b - a) * x + 2 * (a**2 - b**2)
 
+    if is_array_api_obj(x):
+        xp = array_namespace(x)
+        isnan = xp.isnan
+    elif is_xarraylike(x):
+        xp = xr
+        isnan = np.isnan
+    else:
+        raise TypeError
     result = result2.where(x < b, result3)
     result = result.where(x >= a, result1)
-    result = result.where(~np.isnan(x), np.nan)
+    result = result.where(~isnan(x), np.nan)
 
     return result
 
@@ -247,11 +263,19 @@ def _g_j_trap(a: EndpointType, b: EndpointType, c: EndpointType, d: EndpointType
     result2 = x - (b + a) / 2
     result3 = -((d - x) ** 2) / (2 * (d - c)) + (d + c - a - b) / 2
     result4 = (d + c - a - b) / 2
+
+    if is_array_api_obj(x):
+        xp = array_namespace(x)
+        isnan = xp.isnan
+    elif is_xarraylike(x):
+        isnan = np.isnan
+    else:
+        raise TypeError
     result = result1.where(x >= a, result0)
     result = result.where(x < b, result2)
     result = result.where(x < c, result3)
     result = result.where(x < d, result4)
-    result = result.where(~np.isnan(x), np.nan)
+    result = result.where(~isnan(x), np.nan)
     return result
 
 
@@ -287,12 +311,18 @@ def _phi_j_trap(a: EndpointType, b: EndpointType, c: EndpointType, d: EndpointTy
         + 2 * ((b - a) ** 2 + 3 * a * b - (d - c) ** 2 - 3 * c * d) / 3
     )
     result4 = 2 * (d + c - a - b) * x + 2 * ((b - a) ** 2 + 3 * a * b - (d - c) ** 2 - 3 * c * d) / 3
-
+    if is_array_api_obj(x):
+        xp = array_namespace(x)
+        isnan = xp.isnan
+    elif is_xarraylike(x):
+        isnan = np.isnan
+    else:
+        raise TypeError
     result = result1.where(x >= a, result0)
     result = result.where(x < b, result2)
     result = result.where(x < c, result3)
     result = result.where(x < d, result4)
-    result = result.where(~np.isnan(x), np.nan)
+    result = result.where(~isnan(x), np.nan)
 
     return result
 
