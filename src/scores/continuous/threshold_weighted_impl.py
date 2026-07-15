@@ -62,6 +62,15 @@ def _maybe_convert_to_dataarray(
     return endpoint
 
 
+def _maybe_convert_to_array(endpoint: EndpointType, namespace, dtype, device):
+    """
+    Converts a float or int into the provided array API object type.
+    """
+    if isinstance(endpoint, (float, int)):
+        endpoint = namespace.asarray(endpoint, dtype=dtype, device=device)
+    return endpoint
+
+
 def _auxiliary_funcs(
     fcst: xr.DataArray,
     obs: xr.DataArray,
@@ -93,12 +102,22 @@ def _auxiliary_funcs(
             than the right endpoint of ``interval_where_one`` and neither are infinite.
     """
 
+    if is_xarraylike(fcst) and is_xarraylike(obs):
+        isinf = np.isinf
+        _maybe_convert = _maybe_convert_to_dataarray
+    elif is_array_api_obj(fcst) and is_array_api_obj(obs):
+        xp = array_namespace(fcst, obs)
+        isinf = xp.isinf
+        _maybe_convert = functools.partial(_maybe_convert_to_array, namespace=xp, dtype=fcst.dtype, device=fcst.device)
+    else:
+        raise TypeError
+
     if interval_where_positive is None:  # rectangular threshold weight
         a, b = interval_where_one
 
         # Convert to xr.DataArray if a float or int
-        a = _maybe_convert_to_dataarray(a)
-        b = _maybe_convert_to_dataarray(b)
+        a = _maybe_convert(a)
+        b = _maybe_convert(b)
 
         if (a >= b).any():
             raise ValueError("left endpoint of `interval_where_one` must be strictly less than right endpoint")
@@ -115,27 +134,27 @@ def _auxiliary_funcs(
         a, d = interval_where_positive
         b, c = interval_where_one
 
-        a = _maybe_convert_to_dataarray(a)
-        b = _maybe_convert_to_dataarray(b)
-        c = _maybe_convert_to_dataarray(c)
-        d = _maybe_convert_to_dataarray(d)
+        a = _maybe_convert(a)
+        b = _maybe_convert(b)
+        c = _maybe_convert(c)
+        d = _maybe_convert(d)
 
         if (b >= c).any():
             raise ValueError("left endpoint of `interval_where_one` must be strictly less than right endpoint")
 
-        if (np.isinf(a) & (a != b)).any() or (np.isinf(d) & (c != d)).any():
+        if (isinf(a) & (a != b)).any() or (isinf(d) & (c != d)).any():
             raise ValueError(
                 "`interval_where_positive` endpoint can only be infinite when "
                 "corresponding `interval_where_one` endpoint is infinite."
             )
 
-        if not ((a < b) | ((a == b) & np.isinf(a))).all():
+        if not ((a < b) | ((a == b) & isinf(a))).all():
             raise ValueError(
                 "left endpoint of `interval_where_positive` must be less than "
                 "left endpoint of `interval_where_one`, unless both are `-numpy.inf`."
             )
 
-        if not ((c < d) | ((c == d) & np.isinf(c))).all():
+        if not ((c < d) | ((c == d) & isinf(c))).all():
             raise ValueError(
                 "right endpoint of `interval_where_positive` must be greater than "
                 "right endpoint of `interval_where_one`, unless both are `numpy.inf`."

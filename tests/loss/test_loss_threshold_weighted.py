@@ -2,6 +2,7 @@
 Contains unit tests for scores.loss.threshold_weighted
 """
 
+import numpy as np
 import pytest
 
 try:
@@ -12,6 +13,7 @@ except ModuleNotFoundError:
     _SKIP_TORCH_TESTS = True
 
 from scores.continuous.threshold_weighted_impl import (
+    _auxiliary_funcs,
     _g_j_rect,
     _g_j_trap,
     _phi_j_prime_rect,
@@ -106,3 +108,66 @@ def test_aux_trap_funcs(aux_func_trap_test_args, device):
     assert isinstance(result, torch.Tensor)
     assert result.device == expected.device
     torch.testing.assert_close(result, expected, equal_nan=True)
+
+
+@pytest.mark.skipif(_SKIP_TORCH_TESTS, reason="torch not installed")
+@pytest.mark.parametrize(("device",), TEST_DEVICE_PARAMS)
+@pytest.mark.parametrize(
+    ("interval_where_one", "a", "b"),
+    [
+        ((1, 4), 1, 4),
+        ((-np.inf, 5), -6, 5),
+        ((-6, np.inf), -6, 11),
+        # ((DA_A_INF, DA_B_INF), DA_A_FINITE, DA_B_FINITE),
+        # ((DA_INTERVAL_WHERE, np.inf), DA_INTERVAL_WHERE, 11),
+        # ((-np.inf, DA_INTERVAL_WHERE), -6, DA_INTERVAL_WHERE),
+    ],
+)
+def test__auxiliary_funcs1(interval_where_one, a, b, device):
+    """
+    Tests that `_auxiliary_funcs` gives expected results for "rectangular" weights.
+    """
+    interval = tuple(
+        x if isinstance(x, (int, float)) else torch.tensor(x.values, dtype=torch.float, device=device)
+        for x in interval_where_one
+    )
+    a_ = a if isinstance(a, (int, float)) else torch.tensor(a.values, dtype=torch.float, device=device)
+    b_ = b if isinstance(b, (int, float)) else torch.tensor(b.values, dtype=torch.float, device=device)
+    g, phi, phi_prime = _auxiliary_funcs(
+        torch.tensor([-5, 4], dtype=torch.float, device=device),
+        torch.tensor([0, 10], dtype=torch.float, device=device),
+        interval,
+        None,
+    )
+
+    x = torch.linspace(-10, 12, 100, dtype=torch.float, device=device)
+    torch.testing.assert_close(g(x), _g_j_rect(a_, b_, x), equal_nan=True)
+    torch.testing.assert_close(phi(x), _phi_j_rect(a_, b_, x), equal_nan=True)
+    torch.testing.assert_close(phi_prime(x), _phi_j_prime_rect(a_, b_, x), equal_nan=True)
+
+
+@pytest.mark.skipif(_SKIP_TORCH_TESTS, reason="torch not installed")
+@pytest.mark.parametrize(("device",), TEST_DEVICE_PARAMS)
+@pytest.mark.parametrize(
+    ("interval_where_one", "interval_where_positive", "a", "b", "c", "d"),
+    [
+        ((1, 4), (-1, 5), -1, 1, 4, 5),
+        ((-np.inf, 4), (-np.inf, 5), -7, -6, 4, 5),
+        ((-1, np.inf), (-3, np.inf), -3, -1, 11, 12),
+    ],
+)
+# pylint: disable=too-many-positional-arguments
+def test__auxiliary_funcs2(interval_where_one, interval_where_positive, a, b, c, d, device):
+    """
+    Tests that `_auxiliary_funcs` gives expected results for "trapezoidal" weights.
+    """
+    g, phi, phi_prime = _auxiliary_funcs(
+        torch.tensor([0, 10], dtype=torch.float, device=device),
+        torch.tensor([-5, 9], dtype=torch.float, device=device),
+        interval_where_one,
+        interval_where_positive,
+    )
+    x = torch.linspace(-10, 12, 50, dtype=torch.float, device=device)
+    torch.testing.assert_close(g(x), _g_j_trap(a, b, c, d, x), equal_nan=True)
+    torch.testing.assert_close(phi(x), _phi_j_trap(a, b, c, d, x), equal_nan=True)
+    torch.testing.assert_close(phi_prime(x), _phi_j_prime_trap(a, b, c, d, x), equal_nan=True)
