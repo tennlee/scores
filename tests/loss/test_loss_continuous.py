@@ -27,35 +27,29 @@ from tests.continuous.continuous_test_data import (
     MSE_OBS_DA,
     MSE_WEIGHTS_DA,
 )
+from tests.loss.loss_test_utils import TEST_DEVICE_PARAMS
 
 PRECISION = 4
 
 # Mean Squared Error
 #
 
-TEST_DEVICE_PARAMS = [
-    pytest.param(
-        device,
-        marks=pytest.mark.skipif(
-            not getattr(torch, device).is_available(), reason=f"torch device {device} not available."
-        ),
-    )
-    for device in ("cpu", "cuda", "mps")
-]
-
 
 @pytest.fixture(params=[True, False])
 def is_angular(request):
+    "Fixture for whether the MSE calculation is angular"
     return request.param
 
 
 @pytest.fixture(params=[None, MSE_WEIGHTS_DA])
 def weights(request):
+    "Fixture for MSE weights, including the unweighted case"
     return request.param
 
 
 @pytest.fixture
 def mse_test_args(is_angular, weights):
+    "Fixture for inputs and calculating expected MSE value"
     scale = 180.0 / math.pi if is_angular else 1.0
     fcst = scale * MSE_FCST_DA
     obs = scale * MSE_OBS_DA
@@ -80,7 +74,7 @@ def mse_test_args(is_angular, weights):
 @pytest.mark.parametrize(("device",), TEST_DEVICE_PARAMS)
 def test_mse_torch_host_device_consistency(mse_test_args, device):
     """
-    Tests that execution on available devices match host
+    Tests execution on available devices match host
     serial answers within tolerance.
     """
 
@@ -135,6 +129,7 @@ def test_mse_array_consistency(arr_type, mse_test_args):
 
 @pytest.fixture(params=[None, BIAS_WEIGHTS_DA])
 def additive_bias_expected(request):
+    "Fixture aggregating weights and calculating expected additive bias value"
     weights = request.param
     return weights, float(
         scores.continuous.additive_bias(
