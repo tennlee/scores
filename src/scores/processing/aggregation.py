@@ -156,11 +156,6 @@ def _weighted_mean(values, weights, reduce_dims=None):
     # * when encountering nan in `weights`, function raises exception.
     else:
         xp = array_api_compat.array_namespace(values, weights)
-        # TODO: check that weights are >= 0
-        if bool(xp.any(xp.isnan(weights))):
-            raise ValueError("""
-You have specified invalid weights. The weights must be >= 0, with at least one
-strictly positive weight.""")
         weighted_error = xp.multiply(values, weights)
         weighted_sum_of_error = xp.nansum(weighted_error)
         sum_of_weights = xp.sum(
