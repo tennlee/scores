@@ -103,6 +103,7 @@ def _auxiliary_funcs(
     """
 
     if is_xarraylike(fcst) and is_xarraylike(obs):
+        xp = None
         isinf = np.isinf
         _maybe_convert = _maybe_convert_to_dataarray
     elif is_array_api_obj(fcst) and is_array_api_obj(obs):
@@ -123,8 +124,18 @@ def _auxiliary_funcs(
             raise ValueError("left endpoint of `interval_where_one` must be strictly less than right endpoint")
 
         # safest to work with finite a and b
-        a = a.where(a > -np.inf, float(min(fcst.min(), obs.min(), b.min())) - 1)
-        b = b.where(b < np.inf, float(max(fcst.max(), obs.max(), a.max())) + 1)
+        if xp is None:
+            a = a.where(a > -np.inf, float(min(fcst.min(), obs.min(), b.min())) - 1)
+            b = b.where(b < np.inf, float(max(fcst.max(), obs.max(), a.max())) + 1)
+        else:
+            # xarray min/max skips nans, whereas xp.min/max propagate nans
+            # most xp members implement nanmin/max, but torch doesn't.
+            # a/b.min/max are safe because they're xr.DataArrays.
+            tmp = xp.stack((fcst, obs))
+            floor = xp.min(xp.where(xp.isnan(tmp), np.inf, tmp))
+            ceil = xp.max(xp.where(xp.isnan(tmp), -np.inf, tmp))
+            a = xp.where(a > -np.inf, a, float(min(floor, b.min())) - 1)
+            b = xp.where(b < np.inf, b, float(max(ceil, a.max())) + 1)
 
         g = functools.partial(_g_j_rect, a, b)
         phi = functools.partial(_phi_j_rect, a, b)
@@ -161,10 +172,19 @@ def _auxiliary_funcs(
             )
 
         # safest to work with finite intervals
-        b = b.where(b > -np.inf, min(fcst.min(), obs.min(), c.min()) - 1)
-        a = a.where(a > -np.inf, b.min() - 1)
-        c = c.where(c < np.inf, max(fcst.max(), obs.max(), b.max()) + 1)
-        d = d.where(d < np.inf, c.max() + 1)
+        if xp is None:
+            b = b.where(b > -np.inf, min(fcst.min(), obs.min(), c.min()) - 1)
+            a = a.where(a > -np.inf, b.min() - 1)
+            c = c.where(c < np.inf, max(fcst.max(), obs.max(), b.max()) + 1)
+            d = d.where(d < np.inf, c.max() + 1)
+        else:
+            tmp = xp.stack((fcst, obs))
+            floor = xp.min(xp.where(xp.isnan(tmp), np.inf, tmp))
+            ceil = xp.max(xp.where(xp.isnan(tmp), -np.inf, tmp))
+            b = xp.where(b > -np.inf, b, min(floor, c.min()) - 1)
+            a = xp.where(a > -np.inf, a, b.min() - 1)
+            c = xp.where(c < np.inf, c, max(ceil, b.max()) + 1)
+            d = xp.where(d < np.inf, d, c.max() + 1)
 
         g = functools.partial(_g_j_trap, a, b, c, d)
         phi = functools.partial(_phi_j_trap, a, b, c, d)
@@ -197,14 +217,16 @@ def _g_j_rect(a: EndpointType, b: EndpointType, x: xr.DataArray) -> xr.DataArray
 
     if is_array_api_obj(x):
         xp = array_namespace(x)
-        isnan = xp.isnan
+        result = xp.where(x < b, result2, result3)
+        result = xp.where(x >= a, result, result1)
+        result = xp.where(xp.isnan(x), np.nan, result)
     elif is_xarraylike(x):
-        isnan = np.isnan
+        xp = None
+        result = result2.where(x < b, result3)
+        result = result.where(x >= a, result1)
+        result = result.where(~np.isnan(x), np.nan)
     else:
         raise TypeError
-    result = result2.where(x < b, result3)
-    result = result.where(x >= a, result1)
-    result = result.where(~isnan(x), np.nan)
 
     return result
 
@@ -237,15 +259,15 @@ def _phi_j_rect(a: EndpointType, b: EndpointType, x: xr.DataArray) -> xr.DataArr
 
     if is_array_api_obj(x):
         xp = array_namespace(x)
-        isnan = xp.isnan
+        result = xp.where(x < b, result2, result3)
+        result = xp.where(x >= a, result, result1)
+        result = xp.where(xp.isnan(x), np.nan, result)
     elif is_xarraylike(x):
-        xp = xr
-        isnan = np.isnan
+        result = result2.where(x < b, result3)
+        result = result.where(x >= a, result1)
+        result = result.where(~np.isnan(x), np.nan)
     else:
         raise TypeError
-    result = result2.where(x < b, result3)
-    result = result.where(x >= a, result1)
-    result = result.where(~isnan(x), np.nan)
 
     return result
 
@@ -285,16 +307,19 @@ def _g_j_trap(a: EndpointType, b: EndpointType, c: EndpointType, d: EndpointType
 
     if is_array_api_obj(x):
         xp = array_namespace(x)
-        isnan = xp.isnan
+        result = xp.where(x >= a, result1, result0)
+        result = xp.where(x < b, result, result2)
+        result = xp.where(x < c, result, result3)
+        result = xp.where(x < d, result, result4)
+        result = xp.where(xp.isnan(x), np.nan, result)
     elif is_xarraylike(x):
-        isnan = np.isnan
+        result = result1.where(x >= a, result0)
+        result = result.where(x < b, result2)
+        result = result.where(x < c, result3)
+        result = result.where(x < d, result4)
+        result = result.where(~np.isnan(x), np.nan)
     else:
         raise TypeError
-    result = result1.where(x >= a, result0)
-    result = result.where(x < b, result2)
-    result = result.where(x < c, result3)
-    result = result.where(x < d, result4)
-    result = result.where(~isnan(x), np.nan)
     return result
 
 
@@ -332,16 +357,19 @@ def _phi_j_trap(a: EndpointType, b: EndpointType, c: EndpointType, d: EndpointTy
     result4 = 2 * (d + c - a - b) * x + 2 * ((b - a) ** 2 + 3 * a * b - (d - c) ** 2 - 3 * c * d) / 3
     if is_array_api_obj(x):
         xp = array_namespace(x)
-        isnan = xp.isnan
+        result = xp.where(x >= a, result1, result0)
+        result = xp.where(x < b, result, result2)
+        result = xp.where(x < c, result, result3)
+        result = xp.where(x < d, result, result4)
+        result = xp.where(xp.isnan(x), np.nan, result)
     elif is_xarraylike(x):
-        isnan = np.isnan
+        result = result1.where(x >= a, result0)
+        result = result.where(x < b, result2)
+        result = result.where(x < c, result3)
+        result = result.where(x < d, result4)
+        result = result.where(~np.isnan(x), np.nan)
     else:
         raise TypeError
-    result = result1.where(x >= a, result0)
-    result = result.where(x < b, result2)
-    result = result.where(x < c, result3)
-    result = result.where(x < d, result4)
-    result = result.where(~isnan(x), np.nan)
 
     return result
 
