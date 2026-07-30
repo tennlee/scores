@@ -159,7 +159,7 @@ def _weighted_mean(values, weights, reduce_dims=None):
         weighted_error = xp.multiply(values, weights)
         weighted_sum_of_error = xp.nansum(weighted_error)
         sum_of_weights = xp.sum(
-            xp.where(xp.isnan(values), xp.zeros(1, dtype=weights.dtype, device=values.device), weights)
+            xp.where(xp.isnan(values), 0, weights)
         )
         weighted_mean = weighted_sum_of_error / sum_of_weights
         return weighted_mean
