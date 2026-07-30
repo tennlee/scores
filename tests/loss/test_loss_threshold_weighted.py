@@ -27,12 +27,14 @@ from tests.continuous.continuous_test_data import (
     TW_B_TRAP,
     TW_C_TRAP,
     TW_D_TRAP,
+    TW_FCST1_DA,
+    TW_HUBER_PARAM,
+    TW_OBS1_DA,
     TW_X1,
     TW_X2,
     TW_X3,
     TW_X_TRAP,
 )
-from tests.continuous.test_threshold_weighted import DA_FCST1, DA_OBS1, HUBER_PARAM
 from tests.loss.loss_test_utils import TEST_DEVICE_PARAMS
 
 
@@ -163,8 +165,9 @@ def test__auxiliary_funcs2(interval_where_one, interval_where_positive, a, b, c,
     torch.testing.assert_close(phi_prime(x), _phi_j_prime_trap(a, b, c, d, x), equal_nan=True)
 
 
-@pytest.fixture(params=[(tw_huber_loss, {"huber_param": HUBER_PARAM})])
+@pytest.fixture(params=[(tw_huber_loss, {"huber_param": TW_HUBER_PARAM})])
 def scoring_func_args(request):
+    """Fixture representing the scoring functions to test."""
     return request.param
 
 
@@ -176,28 +179,33 @@ def scoring_func_args(request):
     ]
 )
 def intervals(request):
+    """Fixture representing interval_where_one and interval_where_positive args in scoring functions."""
     return request.param
 
 
 @pytest.mark.parametrize(("device"), TEST_DEVICE_PARAMS)
 def test_threshold_weighted_scores(scoring_func_args, intervals, device):
+    """
+    Tests that the scoring functions with torch inputs replicate xarray inputs.
+    Replicates tests.continuous.threshold_weighted
+    """
     scoring_func, kwargs = scoring_func_args
     interval_where_one, interval_where_positive = intervals
 
-    # DA_FCST and DA_OBS1 have different, but overlapping dims
+    # DA_FCST and TW_OBS1_DA have different, but overlapping dims
     # this extracts the dims that overlap with fcst, since torch
     # doesn't do dim matching.
-    da_obs = DA_OBS1[:-1]
+    da_obs = TW_OBS1_DA[:-1]
 
     expected = scoring_func(
-        DA_FCST1,
+        TW_FCST1_DA,
         da_obs,
         interval_where_one=interval_where_one,
         interval_where_positive=interval_where_positive,
         **kwargs,
     )
 
-    fcst = torch.tensor(DA_FCST1.values, dtype=torch.float, device=device)
+    fcst = torch.tensor(TW_FCST1_DA.values, dtype=torch.float, device=device)
     obs = torch.tensor(da_obs.values, dtype=torch.float, device=device)
 
     result = scoring_func(

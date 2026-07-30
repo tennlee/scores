@@ -52,6 +52,24 @@ TW_OBS_DA = xr.DataArray(
     coords=dict(date=["1", "2", "3"], station=[100, 101, 102]),
 )
 
+TW_FCST1_DA = xr.DataArray(
+    data=[[3.0, 1.0, np.nan, 1.3, 8.5], [-4.0, 0.0, 1.0, -3.6, -11.23]],
+    dims=["date", "station"],
+    coords=dict(date=["1", "2"], station=[100, 101, 102, 103, 104]),
+)
+
+TW_OBS1_DA = xr.DataArray(
+    data=[
+        [np.nan, 3.0, 5.0, 34.5, -28.1],
+        [-4.0, 10.0, -1.0, 0.001, 1.3],
+        [3.0, 2.0, -0.2, 1.0, np.nan],
+    ],
+    dims=["date", "station"],
+    coords=dict(date=["1", "2", "3"], station=[100, 101, 102, 103, 104]),
+)
+
+TW_HUBER_PARAM = 0.4
+
 # Threshold-weighted auxiliary function ("rectangular") test arrays
 TW_X1 = xr.DataArray([np.nan, -2.0, 1.0, 5.0])
 

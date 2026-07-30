@@ -43,9 +43,10 @@ from tests.continuous.continuous_test_data import (
     TW_X_TRAP,
 )
 from tests.continuous.continuous_test_data import (
+    TW_FCST1_DA as DA_FCST1,
     TW_FCST_DA as DA_FCST,
-)
-from tests.continuous.continuous_test_data import (
+    TW_HUBER_PARAM as HUBER_PARAM,
+    TW_OBS1_DA as DA_OBS1,
     TW_OBS_DA as DA_OBS,
 )
 
@@ -98,23 +99,6 @@ DA_A_FINITE = xr.DataArray([-101, -1], dims=["station"], coords=dict(station=[10
 
 DA_B_FINITE = xr.DataArray([-100, 11], dims=["station"], coords=dict(station=[100, 101]))
 
-
-DA_FCST1 = xr.DataArray(
-    data=[[3.0, 1.0, nan, 1.3, 8.5], [-4.0, 0.0, 1.0, -3.6, -11.23]],
-    dims=["date", "station"],
-    coords=dict(date=["1", "2"], station=[100, 101, 102, 103, 104]),
-)
-
-DA_OBS1 = xr.DataArray(
-    data=[
-        [nan, 3.0, 5.0, 34.5, -28.1],
-        [-4.0, 10.0, -1.0, 0.001, 1.3],
-        [3.0, 2.0, -0.2, 1.0, nan],
-    ],
-    dims=["date", "station"],
-    coords=dict(date=["1", "2", "3"], station=[100, 101, 102, 103, 104]),
-)
-
 DA_ENDPT1 = xr.DataArray(
     data=[0, 1, 4, -1, 5],
     dims=["station"],
@@ -137,7 +121,6 @@ WEIGHTS = xr.DataArray(
     dims=["station"],
     coords=dict(station=[100, 101, 102, 103, 104]),
 )
-HUBER_PARAM = 0.4
 # Calculated using the Jive MSHL function
 EXP_HL = HUBER_PARAM * (
     xr.DataArray(
