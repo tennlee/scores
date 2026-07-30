@@ -6,9 +6,10 @@ single-valued forecasts targeting quantiles, expectiles or Huber functionals.
 from typing import Callable, Optional
 
 import xarray as xr
+from array_api_compat import is_array_api_obj
 
 from scores.processing import aggregate
-from scores.typing import FlexibleDimensionTypes
+from scores.typing import FlexibleDimensionTypes, is_xarraylike
 from scores.utils import gather_dimensions
 
 
@@ -248,7 +249,15 @@ def consistent_huber_score(
         Dimensions without coordinates: time
     """
     check_huber_param(huber_param)
-    reduce_dims = gather_dimensions(fcst.dims, obs.dims, reduce_dims=reduce_dims, preserve_dims=preserve_dims)
+    if is_xarraylike(fcst) and is_xarraylike(obs):
+        reduce_dims = gather_dimensions(fcst.dims, obs.dims, reduce_dims=reduce_dims, preserve_dims=preserve_dims)
+    elif is_array_api_obj(fcst) and is_array_api_obj(obs):
+        if reduce_dims is not None:
+            raise ValueError("reduce_dims is not supported for generic arrays.")
+        if preserve_dims is not None:
+            raise ValueError("preserve_dims is not supported for generic arrays.")
+        # TODO: Implement reduce_dims and preserve_dims for compat arrs.
+        reduce_dims = tuple(gather_dimensions(range(len(fcst.shape)), range(len(obs.shape))))
 
     kappa = (fcst - obs).clip(min=-huber_param, max=huber_param)
     result = 0.5 * (phi(obs) - phi(kappa + obs) + kappa * phi_prime(fcst))

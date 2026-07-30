@@ -18,6 +18,7 @@ from scores.continuous.threshold_weighted_impl import (
     _phi_j_prime_trap,
     _phi_j_rect,
     _phi_j_trap,
+    tw_huber_loss,
 )
 from tests.continuous.continuous_test_data import (
     TW_A,
@@ -31,6 +32,7 @@ from tests.continuous.continuous_test_data import (
     TW_X3,
     TW_X_TRAP,
 )
+from tests.continuous.test_threshold_weighted import DA_FCST1, DA_OBS1, HUBER_PARAM
 from tests.loss.loss_test_utils import TEST_DEVICE_PARAMS
 
 
@@ -159,3 +161,53 @@ def test__auxiliary_funcs2(interval_where_one, interval_where_positive, a, b, c,
     torch.testing.assert_close(g(x), _g_j_trap(a, b, c, d, x), equal_nan=True)
     torch.testing.assert_close(phi(x), _phi_j_trap(a, b, c, d, x), equal_nan=True)
     torch.testing.assert_close(phi_prime(x), _phi_j_prime_trap(a, b, c, d, x), equal_nan=True)
+
+
+@pytest.fixture(params=[(tw_huber_loss, {"huber_param": HUBER_PARAM})])
+def scoring_func_args(request):
+    return request.param
+
+
+@pytest.fixture(
+    params=[
+        ((-np.inf, np.inf), None),
+        ((-np.inf, 0), None),
+        ((0, np.inf), None),
+    ]
+)
+def intervals(request):
+    return request.param
+
+
+@pytest.mark.parametrize(("device"), TEST_DEVICE_PARAMS)
+def test_threshold_weighted_scores(scoring_func_args, intervals, device):
+    scoring_func, kwargs = scoring_func_args
+    interval_where_one, interval_where_positive = intervals
+
+    # DA_FCST and DA_OBS1 have different, but overlapping dims
+    # this extracts the dims that overlap with fcst, since torch
+    # doesn't do dim matching.
+    da_obs = DA_OBS1[:-1]
+
+    expected = scoring_func(
+        DA_FCST1,
+        da_obs,
+        interval_where_one=interval_where_one,
+        interval_where_positive=interval_where_positive,
+        **kwargs,
+    )
+
+    fcst = torch.tensor(DA_FCST1.values, dtype=torch.float, device=device)
+    obs = torch.tensor(da_obs.values, dtype=torch.float, device=device)
+
+    result = scoring_func(
+        fcst,
+        obs,
+        interval_where_one=interval_where_one,
+        interval_where_positive=interval_where_positive,
+        **kwargs,
+    )
+
+    assert isinstance(result, torch.Tensor)
+    assert result.device == fcst.device
+    torch.testing.assert_close(result, torch.tensor(expected.values, dtype=result.dtype, device=result.device))
