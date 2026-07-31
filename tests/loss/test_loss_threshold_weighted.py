@@ -18,8 +18,8 @@ from scores.continuous.threshold_weighted_impl import (
     _phi_j_prime_trap,
     _phi_j_rect,
     _phi_j_trap,
-    tw_huber_loss,
 )
+from scores.loss import tw_huber_loss
 from tests.continuous.continuous_test_data import (
     TW_A,
     TW_A_TRAP,

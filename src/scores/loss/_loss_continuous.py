@@ -82,3 +82,76 @@ def additive_bias(
     score = __continuous.additive_bias(fcst, obs, weights=weights)
 
     return score
+
+
+def tw_huber_loss(
+    fcst,
+    obs,
+    huber_param,
+    interval_where_one,
+    *,
+    interval_where_positive=None,
+    # TODO: implement preserve_dims = "all"
+    # TODO: implement weights
+):
+    """
+    Returns the threshold weighted Huber loss.
+
+    For more flexible threshold weighting schemes,
+    see :py:func:`scores.continuous.consistent_huber_score`.
+
+    Two types of threshold weighting are supported: rectangular and trapezoidal.
+        - To specify a rectangular threshold weight, set ``interval_where_positive=None`` and set
+            ``interval_where_one`` to be the interval where the threshold weight is 1.
+            For example, if  ``interval_where_one=(0, 10)`` then a threshold weight of 1
+            is applied to decision thresholds satisfying 0 <= threshold < 10, and a threshold weight of 0 is
+            applied otherwise. Interval endpoints can be ``-numpy.inf`` or ``numpy.inf``.
+        - To specify a trapezoidal threshold weight, specify ``interval_where_positive`` and ``interval_where_one``
+            using desired endpoints. For example, if ``interval_where_positive=(-2, 10)`` and
+            ``interval_where_one=(2, 4)`` then a threshold weight of 1 is applied to decision thresholds
+            satisfying 2 <= threshold < 4. The threshold weight increases linearly from 0 to 1 on the interval
+            [-2, 2) and decreases linearly from 1 to 0 on the interval [4, 10], and is 0 otherwise.
+            Interval endpoints can only be infinite if the corresponding ``interval_where_one`` endpoint
+            is infinite. End points of ``interval_where_positive`` and ``interval_where_one`` must differ
+            except when the endpoints are infinite.
+
+    Args:
+        fcst: array of forecast values.
+        obs: array of corresponding observation values.
+        huber_param: the Huber transition parameter.
+        interval_where_one: endpoints of the interval where the threshold weights are 1.
+            Must be increasing. Infinite endpoints are permissible. By supplying a tuple of
+            arrays, endpoints can vary with dimension.
+        interval_where_positive: endpoints of the interval where the threshold weights are positive.
+            Must be increasing. Infinite endpoints are only permissible when the corresponding
+            ``interval_where_one`` endpoint is infinite. By supplying a tuple of
+            arrays, endpoints can vary with dimension.
+        reduce_dims: Optionally specify which dimensions to reduce when
+            calculating the threshold_weighted_expectile_score. All other dimensions will be preserved. As a
+            special case, 'all' will allow all dimensions to be reduced. Only one
+            of ``reduce_dims`` and ``preserve_dims`` can be supplied. The default behaviour
+            if neither are supplied is to reduce all dims.
+        preserve_dims: Optionally specify which dimensions to preserve when calculating
+            the threshold_weighted_expectile_score. All other dimensions will be reduced. As a special case, 'all'
+            will allow all dimensions to be preserved. In this case, the result will be in
+            the same shape/dimensionality as the forecast, and the errors will be the threshold_weighted_expectile_score
+            at each point (i.e. single-value comparison against observed), and the
+            forecast and observed dimensions must match precisely. Only one of ``reduce_dims``
+            and ``preserve_dims`` can be supplied. The default behaviour if neither are supplied
+            is to reduce all dims.
+        weights: An array of weights to apply to the score (e.g., weighting a grid by latitude).
+            If None, no weights are applied. If provided, the weights must be broadcastable
+            to the data dimensions and must not contain negative or NaN values. If
+            appropriate, users can choose to replace NaN values in weights by calling ``weights.fillna(0)``.
+            The weighting approach follows :py:class:`xarray.computation.weighted.DataArrayWeighted`.
+            See the scores weighting tutorial for more information on how to use weights.
+
+    Returns:
+        xarray data array of the threshold weighted expectile error
+    """
+
+    score = __continuous.tw_huber_loss(
+        fcst, obs, huber_param, interval_where_one, interval_where_positive=interval_where_positive
+    )
+
+    return score
