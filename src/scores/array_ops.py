@@ -5,6 +5,7 @@ to a) reduce code duplication, and b) ensure same treatment of NaNs for differen
 backends.
 """
 
+import numpy as np
 from array_api_compat import array_namespace
 
 from scores.typing import is_xarraylike
@@ -48,3 +49,79 @@ def where(condition, a, b, namespace=None):
     else:
         xp = namespace
     return xp.where(condition, a, b)
+
+
+def nanmin(x, namespace=None):
+    """
+    Returns minimum of entire array, ignoring any NaNs.
+
+    Dispatches to ``x.min()`` for xarray objects. For Python Array API objects,
+    a custom implementation of nanmin using Python Array API functions is used.
+    Some Python Array API members provide nanmin, but not all. Members that
+    don't: ``torch``.
+
+    .. note::
+
+        For internal use only.
+
+    Args:
+        x: Array containing numbers whose minimum is desired.
+        namespace: array namespace to dispatch to, when it is already known to the
+            caller. Supplying it skips type inspection, so it is the preferred
+            form inside loops or hot paths. Pass ``None`` for xarray inputs, or
+            to have the namespace inferred from the arguments.
+    """
+
+    if namespace is None:
+        if is_xarraylike(x):
+            return x.min(skipna=None)
+        xp = array_namespace(x)
+    else:
+        xp = namespace
+    # explicitly skips over nans by marking them as inf
+    result = xp.min(xp.where(xp.isnan(x), np.inf, x))
+
+    # crude handling of all nans
+    if result == np.inf:
+        if xp.all(xp.isnan(x)):
+            # nanmin must same type as x
+            result = xp.asarray(np.nan, dtype=x.dtype, device=x.device)
+    return result
+
+
+def nanmax(x, namespace=None):
+    """
+    Returns maximum of entire array, ignoring any NaNs.
+
+    Dispatches to ``x.max()`` for xarray objects. For Python Array API objects,
+    a custom implementation of nanmax using Python Array API functions is used.
+    Some Python Array API members provide nanmin, but not all. Members that
+    don't: ``torch``.
+
+    .. note::
+
+        For internal use only.
+
+    Args:
+        x: Array containing numbers whose maximum is desired.
+        namespace: array namespace to dispatch to, when it is already known to the
+            caller. Supplying it skips type inspection, so it is the preferred
+            form inside loops or hot paths. Pass ``None`` for xarray inputs, or
+            to have the namespace inferred from the arguments.
+    """
+
+    if namespace is None:
+        if is_xarraylike(x):
+            return x.max(skipna=None)
+        xp = array_namespace(x)
+    else:
+        xp = namespace
+    # explicitly skips over nans by marking them as -inf
+    result = xp.max(xp.where(xp.isnan(x), -np.inf, x))
+
+    # crude handling of all nans
+    if result == -np.inf:
+        if xp.all(xp.isnan(x)):
+            # nanmin must same type as x
+            result = xp.asarray(np.nan, dtype=x.dtype, device=x.device)
+    return result

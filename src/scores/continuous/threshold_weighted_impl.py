@@ -10,7 +10,7 @@ import numpy as np
 import xarray as xr
 from array_api_compat import array_namespace, is_array_api_obj
 
-from scores.array_ops import where
+from scores.array_ops import nanmax, nanmin, where
 from scores.continuous.consistent_impl import (
     check_alpha,
     check_huber_param,
@@ -125,18 +125,9 @@ def _auxiliary_funcs(
             raise ValueError("left endpoint of `interval_where_one` must be strictly less than right endpoint")
 
         # safest to work with finite a and b
-        if xp is None:
-            floor = float(min(fcst.min(), obs.min(), b.min())) - 1
-            ceil = float(max(fcst.max(), obs.max(), a.max())) + 1
-        else:
-            # xarray min/max skips nans, whereas xp.min/max propagate nans
-            # most xp members implement nanmin/max, but torch doesn't.
-            # a/b.min/max are safe because they're xr.DataArrays.
-            tmp = xp.stack((fcst, obs))
-            floor = xp.min(xp.where(xp.isnan(tmp), np.inf, tmp))
-            ceil = xp.max(xp.where(xp.isnan(tmp), -np.inf, tmp))
-            floor = float(min(floor, b.min())) - 1
-            ceil = float(max(ceil, a.max())) + 1
+        floor = float(min(nanmin(fcst), nanmin(obs), b.min())) - 1
+        ceil = float(max(nanmax(fcst), nanmax(obs), a.max())) + 1
+
         a = where(a > -np.inf, a, floor, xp)
         b = where(b < np.inf, b, ceil, xp)
 
@@ -175,15 +166,8 @@ def _auxiliary_funcs(
             )
 
         # safest to work with finite intervals
-        if xp is None:
-            floor = min(fcst.min(), obs.min(), c.min()) - 1
-            ceil = max(fcst.max(), obs.max(), b.max()) + 1
-        else:
-            tmp = xp.stack((fcst, obs))
-            floor = xp.min(xp.where(xp.isnan(tmp), np.inf, tmp))
-            ceil = xp.max(xp.where(xp.isnan(tmp), -np.inf, tmp))
-            floor = min(floor, c.min()) - 1
-            ceil = max(ceil, b.max()) + 1
+        floor = min(nanmin(fcst), nanmin(obs), c.min()) - 1
+        ceil = max(nanmax(fcst), nanmax(obs), b.max()) + 1
         b = where(b > -np.inf, b, floor, xp)
         a = where(a > -np.inf, a, b.min() - 1, xp)
         c = where(c < np.inf, c, ceil, xp)
