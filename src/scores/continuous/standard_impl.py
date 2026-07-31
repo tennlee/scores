@@ -6,6 +6,7 @@ from typing import Optional, Union
 
 import numpy as np
 import xarray as xr
+from array_api_compat import is_array_api_obj
 
 import scores.functions
 import scores.utils
@@ -126,6 +127,13 @@ def mse(
         reduce_dims = scores.utils.gather_dimensions(
             fcst.dims, obs.dims, reduce_dims=reduce_dims, preserve_dims=preserve_dims
         )
+    elif is_array_api_obj(fcst):
+        if reduce_dims is not None:
+            raise ValueError("reduce_dims is not supported for generic arrays.")
+        if preserve_dims is not None:
+            raise ValueError("preserve_dims is not supported for generic arrays.")
+        # TODO: Implement reduce_dims and preserve_dims for compat arrs.
+        reduce_dims = tuple(scores.utils.gather_dimensions(range(len(fcst.shape)), range(len(obs.shape))))
 
     if is_angular:
         error = scores.functions.angular_difference(fcst, obs)
@@ -133,7 +141,7 @@ def mse(
         error = fcst - obs
     squared = error * error
 
-    if is_xarraylike(squared):
+    if is_xarraylike(squared) or is_array_api_obj(squared):
         result = aggregate(squared, reduce_dims=reduce_dims, weights=weights)
     elif weights is not None:
         raise ValueError("If `fcst` and `obs` are not xarray objects, `weights` must be None.")
@@ -553,9 +561,15 @@ def additive_bias(
 
     """
     # Note - mean error call this function
-    reduce_dims = scores.utils.gather_dimensions(
-        fcst.dims, obs.dims, reduce_dims=reduce_dims, preserve_dims=preserve_dims
-    )
+    if is_xarraylike(fcst) and is_xarraylike(obs):
+        reduce_dims = scores.utils.gather_dimensions(
+            fcst.dims, obs.dims, reduce_dims=reduce_dims, preserve_dims=preserve_dims
+        )
+    elif is_array_api_obj(fcst) and is_array_api_obj(obs):
+        reduce_dims = tuple(range(len(fcst.shape)))
+    else:
+        raise TypeError("`fcst` and `obs` must both be XArray-like or a Python Array API object.")
+
     error = fcst - obs
 
     score = aggregate(error, reduce_dims=reduce_dims, weights=weights)

@@ -30,47 +30,30 @@ from scores.continuous.threshold_weighted_impl import (
     tw_quantile_score,
     tw_squared_error,
 )
-
-DA_FCST = xr.DataArray(
-    data=[[[3.0, 1.0, nan, 2], [3.0, 1.0, nan, 2]], [[-4.0, 0.0, 1.0, 2], [-4.0, 0.0, 1.0, 2]]],
-    dims=["date", "lead_day", "station"],
-    coords=dict(
-        date=["1", "2"],
-        lead_day=[1, 1],
-        station=[100, 101, 102, 0],
-    ),
+from tests.continuous.continuous_test_data import (
+    TW_A,
+    TW_A_TRAP,
+    TW_B,
+    TW_B_TRAP,
+    TW_C_TRAP,
+    TW_D_TRAP,
+    TW_X1,
+    TW_X2,
+    TW_X3,
+    TW_X_TRAP,
 )
-
-DA_OBS = xr.DataArray(
-    data=[[nan, 3.0, 5.0], [-4.0, 10.0, -1.0], [3.0, 2.0, -0.2]],
-    dims=["date", "station"],
-    coords=dict(date=["1", "2", "3"], station=[100, 101, 102]),
+from tests.continuous.continuous_test_data import (
+    TW_FCST1_DA as DA_FCST1,
+    TW_FCST_DA as DA_FCST,
+    TW_HUBER_PARAM as HUBER_PARAM,
+    TW_OBS1_DA as DA_OBS1,
+    TW_OBS_DA as DA_OBS,
 )
 
 # Mimic DA_OBS for rectangular threshold weight
 DA_INTERVAL_WHERE = xr.full_like(DA_OBS, 3.0)
 
-DA_X1 = xr.DataArray([nan, -2.0, 1.0, 5.0])
-
 EXP_G_J_RECT1 = xr.DataArray([nan, 0.0, 2.0, 3.0])  # a = -1, b = 2
-
-DA_X2 = xr.DataArray(
-    data=[[nan, -2.0, 1.0, 11.0]],
-    dims=["date", "station"],
-    coords=dict(date=["01"], station=[100, 101, 102, 103]),
-)
-
-DA_A = xr.DataArray(
-    data=[-1.0, 0.0, -1.0, 10.0],
-    dims=["station"],
-    coords=dict(station=[100, 101, 102, 103]),
-)
-
-DA_B = xr.DataArray(
-    data=[2.0, 2.0, 0.0, 12.0],
-    dims=["station"],
-    coords=dict(station=[100, 101, 102, 103]),
-)
 
 EXP_G_J_RECT2 = xr.DataArray(
     data=[[nan, 0.0, 1.0, 1.0]],
@@ -88,40 +71,9 @@ EXP_PHI_J_RECT2 = xr.DataArray(
 
 EXP_PHI_J_PRIME_RECT1 = 4 * EXP_G_J_RECT1
 
-DA_X3 = xr.DataArray([nan, -3.0, 0.0, 2.0, 5.0, 10.0])
 # s = 5
 # a = -2, b = 1, c = 5, d = 8
 EXP_G_J_TRAP1 = xr.DataArray([nan, 0.0, 2 / 3, 2.5, 7 - 3 / 2, 7.0])
-
-DA_A_TRAP = xr.DataArray(
-    data=[[0, 10]],
-    dims=["date", "station"],
-    coords=dict(date=["01"], station=[100, 101]),
-)
-
-DA_B_TRAP = xr.DataArray(
-    data=[[2, 20]],
-    dims=["date", "station"],
-    coords=dict(date=["01"], station=[100, 101]),
-)
-
-DA_C_TRAP = xr.DataArray(
-    data=[[5, 25]],
-    dims=["date", "station"],
-    coords=dict(date=["01"], station=[100, 101]),
-)
-
-DA_D_TRAP = xr.DataArray(
-    data=[[6, 30]],
-    dims=["date", "station"],
-    coords=dict(date=["01"], station=[100, 101]),
-)
-
-DA_X_TRAP = xr.DataArray(
-    data=[[3, 15]],
-    dims=["date", "station"],
-    coords=dict(date=["01"], station=[100, 101]),
-)
 
 EXP_G_J_TRAP2 = xr.DataArray(
     data=[[2.0, 1.25]],
@@ -147,23 +99,6 @@ DA_A_FINITE = xr.DataArray([-101, -1], dims=["station"], coords=dict(station=[10
 
 DA_B_FINITE = xr.DataArray([-100, 11], dims=["station"], coords=dict(station=[100, 101]))
 
-
-DA_FCST1 = xr.DataArray(
-    data=[[3.0, 1.0, nan, 1.3, 8.5], [-4.0, 0.0, 1.0, -3.6, -11.23]],
-    dims=["date", "station"],
-    coords=dict(date=["1", "2"], station=[100, 101, 102, 103, 104]),
-)
-
-DA_OBS1 = xr.DataArray(
-    data=[
-        [nan, 3.0, 5.0, 34.5, -28.1],
-        [-4.0, 10.0, -1.0, 0.001, 1.3],
-        [3.0, 2.0, -0.2, 1.0, nan],
-    ],
-    dims=["date", "station"],
-    coords=dict(date=["1", "2", "3"], station=[100, 101, 102, 103, 104]),
-)
-
 DA_ENDPT1 = xr.DataArray(
     data=[0, 1, 4, -1, 5],
     dims=["station"],
@@ -186,7 +121,6 @@ WEIGHTS = xr.DataArray(
     dims=["station"],
     coords=dict(station=[100, 101, 102, 103, 104]),
 )
-HUBER_PARAM = 0.4
 # Calculated using the Jive MSHL function
 EXP_HL = HUBER_PARAM * (
     xr.DataArray(
@@ -313,14 +247,14 @@ EXP_HL = HUBER_PARAM * (
         ),
         (
             tw_huber_loss,
-            (DA_B, DA_A),
+            (TW_B, TW_A),
             None,
             {"huber_param": 1},
             "left endpoint of `interval_where_one` must be strictly less than right endpoint",
         ),
         (
             tw_huber_loss,
-            (DA_B, DA_A),
+            (TW_B, TW_A),
             None,
             {"huber_param": 1},
             "left endpoint of `interval_where_one` must be strictly less than right endpoint",
@@ -404,8 +338,8 @@ def test_threshold_weighted_score_raises(
 @pytest.mark.parametrize(
     ("a", "b", "x", "expected"),
     [
-        (-1.0, 2.0, DA_X1, EXP_G_J_RECT1),  # a, b float; all cases tested
-        (DA_A, DA_B, DA_X2, EXP_G_J_RECT2),  # a, b array
+        (-1.0, 2.0, TW_X1, EXP_G_J_RECT1),  # a, b float; all cases tested
+        (TW_A, TW_B, TW_X2, EXP_G_J_RECT2),  # a, b array
     ],
 )
 def test__g_j_rect(a, b, x, expected):
@@ -417,8 +351,8 @@ def test__g_j_rect(a, b, x, expected):
 @pytest.mark.parametrize(
     ("a", "b", "x", "expected"),
     [
-        (-1.0, 2.0, DA_X1, EXP_PHI_J_RECT1),  # a, b float; all cases tested
-        (DA_A, DA_B, DA_X2, EXP_PHI_J_RECT2),  # a, b array
+        (-1.0, 2.0, TW_X1, EXP_PHI_J_RECT1),  # a, b float; all cases tested
+        (TW_A, TW_B, TW_X2, EXP_PHI_J_RECT2),  # a, b array
     ],
 )
 def test__phi_j_rect(a, b, x, expected):
@@ -429,20 +363,20 @@ def test__phi_j_rect(a, b, x, expected):
 
 def test__phi_j_prime_rect():
     """Tests that `_phi_j_prime_rect` gives results as expected."""
-    result = _phi_j_prime_rect(-1.0, 2.0, DA_X1)
+    result = _phi_j_prime_rect(-1.0, 2.0, TW_X1)
     xr.testing.assert_allclose(result, EXP_PHI_J_PRIME_RECT1)
 
 
 @pytest.mark.parametrize(
     ("a", "b", "c", "d", "x", "expected"),
     [
-        (-2, 1, 5, 8, DA_X3, EXP_G_J_TRAP1),  # a, b, c, d float; all cases tested
+        (-2, 1, 5, 8, TW_X3, EXP_G_J_TRAP1),  # a, b, c, d float; all cases tested
         (
-            DA_A_TRAP,
-            DA_B_TRAP,
-            DA_C_TRAP,
-            DA_D_TRAP,
-            DA_X_TRAP,
+            TW_A_TRAP,
+            TW_B_TRAP,
+            TW_C_TRAP,
+            TW_D_TRAP,
+            TW_X_TRAP,
             EXP_G_J_TRAP2,
         ),  # endpoints are arrays
     ],
@@ -457,13 +391,13 @@ def test__g_j_trap(a, b, c, d, x, expected):
 @pytest.mark.parametrize(
     ("a", "b", "c", "d", "x", "expected"),
     [
-        (-2, 1, 5, 8, DA_X3, EXP_PHI_J_TRAP1),  # endpts float; all cases tested
+        (-2, 1, 5, 8, TW_X3, EXP_PHI_J_TRAP1),  # endpts float; all cases tested
         (
-            DA_A_TRAP,
-            DA_B_TRAP,
-            DA_C_TRAP,
-            DA_D_TRAP,
-            DA_X_TRAP,
+            TW_A_TRAP,
+            TW_B_TRAP,
+            TW_C_TRAP,
+            TW_D_TRAP,
+            TW_X_TRAP,
             EXP_PHI_J_TRAP2,
         ),  # endpoints are arrays
     ],
@@ -477,7 +411,7 @@ def test__phi_j_trap(a, b, c, d, x, expected):
 
 def test__phi_j_prime_trap():
     """Tests that `_phi_j_prime_trap` gives results as expected."""
-    result = _phi_j_prime_trap(-2, 1, 5, 8, DA_X3)
+    result = _phi_j_prime_trap(-2, 1, 5, 8, TW_X3)
     xr.testing.assert_allclose(result, EXP_PHI_J_PRIME_TRAP)
 
 

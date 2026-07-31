@@ -8,7 +8,9 @@ from typing import Callable, Optional, Tuple, Union
 
 import numpy as np
 import xarray as xr
+from array_api_compat import array_namespace, is_array_api_obj
 
+from scores.array_ops import nanmax, nanmin, where
 from scores.continuous.consistent_impl import (
     check_alpha,
     check_huber_param,
@@ -16,7 +18,7 @@ from scores.continuous.consistent_impl import (
     consistent_huber_score,
     consistent_quantile_score,
 )
-from scores.typing import FlexibleDimensionTypes
+from scores.typing import FlexibleDimensionTypes, is_xarraylike
 
 AuxFuncType = Callable[[xr.DataArray], xr.DataArray]
 EndpointType = Union[int, float, xr.DataArray]
@@ -61,6 +63,15 @@ def _maybe_convert_to_dataarray(
     return endpoint
 
 
+def _maybe_convert_to_array(endpoint: EndpointType, namespace, dtype, device):
+    """
+    Converts a float or int into the provided array API object type.
+    """
+    if isinstance(endpoint, (float, int)):
+        endpoint = namespace.asarray(endpoint, dtype=dtype, device=device)
+    return endpoint
+
+
 def _auxiliary_funcs(
     fcst: xr.DataArray,
     obs: xr.DataArray,
@@ -92,19 +103,33 @@ def _auxiliary_funcs(
             than the right endpoint of ``interval_where_one`` and neither are infinite.
     """
 
+    if is_xarraylike(fcst) and is_xarraylike(obs):
+        xp = None
+        isinf = np.isinf
+        _maybe_convert = _maybe_convert_to_dataarray
+    elif is_array_api_obj(fcst) and is_array_api_obj(obs):
+        xp = array_namespace(fcst, obs)
+        isinf = xp.isinf
+        _maybe_convert = functools.partial(_maybe_convert_to_array, namespace=xp, dtype=fcst.dtype, device=fcst.device)
+    else:
+        raise TypeError
+
     if interval_where_positive is None:  # rectangular threshold weight
         a, b = interval_where_one
 
         # Convert to xr.DataArray if a float or int
-        a = _maybe_convert_to_dataarray(a)
-        b = _maybe_convert_to_dataarray(b)
+        a = _maybe_convert(a)
+        b = _maybe_convert(b)
 
         if (a >= b).any():
             raise ValueError("left endpoint of `interval_where_one` must be strictly less than right endpoint")
 
         # safest to work with finite a and b
-        a = a.where(a > -np.inf, float(min(fcst.min(), obs.min(), b.min())) - 1)
-        b = b.where(b < np.inf, float(max(fcst.max(), obs.max(), a.max())) + 1)
+        floor = float(min(nanmin(fcst), nanmin(obs), b.min())) - 1
+        ceil = float(max(nanmax(fcst), nanmax(obs), a.max())) + 1
+
+        a = where(a > -np.inf, a, floor, xp)
+        b = where(b < np.inf, b, ceil, xp)
 
         g = functools.partial(_g_j_rect, a, b)
         phi = functools.partial(_phi_j_rect, a, b)
@@ -114,37 +139,39 @@ def _auxiliary_funcs(
         a, d = interval_where_positive
         b, c = interval_where_one
 
-        a = _maybe_convert_to_dataarray(a)
-        b = _maybe_convert_to_dataarray(b)
-        c = _maybe_convert_to_dataarray(c)
-        d = _maybe_convert_to_dataarray(d)
+        a = _maybe_convert(a)
+        b = _maybe_convert(b)
+        c = _maybe_convert(c)
+        d = _maybe_convert(d)
 
         if (b >= c).any():
             raise ValueError("left endpoint of `interval_where_one` must be strictly less than right endpoint")
 
-        if (np.isinf(a) & (a != b)).any() or (np.isinf(d) & (c != d)).any():
+        if (isinf(a) & (a != b)).any() or (isinf(d) & (c != d)).any():
             raise ValueError(
                 "`interval_where_positive` endpoint can only be infinite when "
                 "corresponding `interval_where_one` endpoint is infinite."
             )
 
-        if not ((a < b) | ((a == b) & np.isinf(a))).all():
+        if not ((a < b) | ((a == b) & isinf(a))).all():
             raise ValueError(
                 "left endpoint of `interval_where_positive` must be less than "
                 "left endpoint of `interval_where_one`, unless both are `-numpy.inf`."
             )
 
-        if not ((c < d) | ((c == d) & np.isinf(c))).all():
+        if not ((c < d) | ((c == d) & isinf(c))).all():
             raise ValueError(
                 "right endpoint of `interval_where_positive` must be greater than "
                 "right endpoint of `interval_where_one`, unless both are `numpy.inf`."
             )
 
         # safest to work with finite intervals
-        b = b.where(b > -np.inf, min(fcst.min(), obs.min(), c.min()) - 1)
-        a = a.where(a > -np.inf, b.min() - 1)
-        c = c.where(c < np.inf, max(fcst.max(), obs.max(), b.max()) + 1)
-        d = d.where(d < np.inf, c.max() + 1)
+        floor = min(nanmin(fcst), nanmin(obs), c.min()) - 1
+        ceil = max(nanmax(fcst), nanmax(obs), b.max()) + 1
+        b = where(b > -np.inf, b, floor, xp)
+        a = where(a > -np.inf, a, b.min() - 1, xp)
+        c = where(c < np.inf, c, ceil, xp)
+        d = where(d < np.inf, d, c.max() + 1, xp)
 
         g = functools.partial(_g_j_trap, a, b, c, d)
         phi = functools.partial(_phi_j_trap, a, b, c, d)
@@ -175,9 +202,14 @@ def _g_j_rect(a: EndpointType, b: EndpointType, x: xr.DataArray) -> xr.DataArray
     result2 = x - a
     result3 = b - a
 
-    result = result2.where(x < b, result3)
-    result = result.where(x >= a, result1)
-    result = result.where(~np.isnan(x), np.nan)
+    xp = None
+    isnan = np.isnan
+    if is_array_api_obj(x):
+        xp = array_namespace(x)
+        isnan = xp.isnan
+    result = where(x < b, result2, result3, xp)
+    result = where(x >= a, result, result1, xp)
+    result = where(~isnan(x), result, np.nan, xp)
 
     return result
 
@@ -208,9 +240,14 @@ def _phi_j_rect(a: EndpointType, b: EndpointType, x: xr.DataArray) -> xr.DataArr
     result2 = 2 * (x - a) ** 2
     result3 = 4 * (b - a) * x + 2 * (a**2 - b**2)
 
-    result = result2.where(x < b, result3)
-    result = result.where(x >= a, result1)
-    result = result.where(~np.isnan(x), np.nan)
+    xp = None
+    isnan = np.isnan
+    if is_array_api_obj(x):
+        xp = array_namespace(x)
+        isnan = xp.isnan
+    result = where(x < b, result2, result3, xp)
+    result = where(x >= a, result, result1, xp)
+    result = where(~isnan(x), result, np.nan, xp)
 
     return result
 
@@ -247,11 +284,17 @@ def _g_j_trap(a: EndpointType, b: EndpointType, c: EndpointType, d: EndpointType
     result2 = x - (b + a) / 2
     result3 = -((d - x) ** 2) / (2 * (d - c)) + (d + c - a - b) / 2
     result4 = (d + c - a - b) / 2
-    result = result1.where(x >= a, result0)
-    result = result.where(x < b, result2)
-    result = result.where(x < c, result3)
-    result = result.where(x < d, result4)
-    result = result.where(~np.isnan(x), np.nan)
+
+    xp = None
+    isnan = np.isnan
+    if is_array_api_obj(x):
+        xp = array_namespace(x)
+        isnan = xp.isnan
+    result = where(x >= a, result1, result0, xp)
+    result = where(x < b, result, result2, xp)
+    result = where(x < c, result, result3, xp)
+    result = where(x < d, result, result4, xp)
+    result = where(~isnan(x), result, np.nan, xp)
     return result
 
 
@@ -288,11 +331,16 @@ def _phi_j_trap(a: EndpointType, b: EndpointType, c: EndpointType, d: EndpointTy
     )
     result4 = 2 * (d + c - a - b) * x + 2 * ((b - a) ** 2 + 3 * a * b - (d - c) ** 2 - 3 * c * d) / 3
 
-    result = result1.where(x >= a, result0)
-    result = result.where(x < b, result2)
-    result = result.where(x < c, result3)
-    result = result.where(x < d, result4)
-    result = result.where(~np.isnan(x), np.nan)
+    xp = None
+    isnan = np.isnan
+    if is_array_api_obj(x):
+        xp = array_namespace(x)
+        isnan = xp.isnan
+    result = where(x >= a, result1, result0, xp)
+    result = where(x < b, result, result2, xp)
+    result = where(x < c, result, result3, xp)
+    result = where(x < d, result, result4, xp)
+    result = where(~isnan(x), result, np.nan, xp)
 
     return result
 
